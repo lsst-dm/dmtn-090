@@ -61,8 +61,8 @@ of the DAX Webservices.  The DAX Webservices are the way to get LSST data throug
 a set of IVOA compliant services that will allow any tool or client supporting
 IVOA standards to query and retrieve data.
 
-Purpose
-=======
+Having Standards
+================
 
 The purpose of the DAX Webservices is to provide an IVOA compliant interface
 to access LSST data, both catalog data (and its metadata) as well as image
@@ -98,17 +98,104 @@ implement, how we might implement them, and where the tricky parts may be.
 Why are standards important?
 ----------------------------
 
+Astronomers have been writing code for quite a long time.  In the era of
+multi-messenger astronomy and cross-referencing datasets of multiple
+instruments, one way needed to be created to standardize access to the
+data.  Otherwise, every time a new telescope is created, owners and maintainers
+of astronomy tools would have to add support for the new telescope, taking
+into account the idiosyncratic nature of that particular instrument.
+
+By providing one standard way of doing it, we allow for one tool to use
+data from multiple instruments.  We can also use tools developed before LSST,
+unchanged, to access LSST data if we want.  This allows for astronomers
+to have working, tested tools before our telescope is even ready for this level
+of integration testing.
+
+There are many things about the standards that I find confusing, or disagree
+with.  But like the law, the standard is the standard.  I'm no fan of XML, but
+it is better to support the standard and not love it, than try and break bad.
+
+Each time the standard is not followed, there may be features or unintended
+consequences in 3rd party tools.  For example, if an unknown state was returned
+from an API, or a required key was missing, each tool will respond and error
+in its own way.  Some may stop working, some may ignore it, some may outright
+crash or throw an exception.  Tools differ in their access patterns even
+using a standard, so we also need to do compatibility testing with tools we
+want to officially support for our users.
+
+We can do things above and beyond the standard, but we should know that those
+things cannot interfere with what is stipulated by the standard.  Some additions
+may be nice, but these must be measured against the impact of implementing more
+of the IVOA standards, which will be used by more tools rather than just our
+custom LSST tools.
+
 What standards to we want to support?
 -------------------------------------
+
+We will implement an interface that supports these standards.  Links
+are provided to give a reference set of versions to allow people to
+communicate about sections and page numbers of each particular
+specification:
+
+Catalog oriented standards:
+
+- `TAP 1.1 <http://www.ivoa.net/documents/TAP/20170830/PR-TAP-1.1-20170830.pdf>`_
+
+- `VOTable 1.3 <http://www.ivoa.net/documents/VOTable/20130920/REC-VOTable-1.3-20130920.pdf>`_
+
+- `Universal Worker Service (UWS) 1.1 <http://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.pdf>`_
+
+- `ADQL 2.0 <http://www.ivoa.net/documents/REC/ADQL/ADQL-20081030.pdf>`_
+
+Image oriented standards:
+
+- `SODA 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
+
+- `ObsTAP <http://www.ivoa.net/documents/ObsCore/20170509/REC-ObsCore-v1.1-20170509.pdf>`_
+
+- `SIA 2.0 <http://www.ivoa.net/documents/SIA/20151223/REC-SIA-2.0-20151223.pdf>`_
+
+
+User storage standards:
+
+- `VOSpace 2.1 <http://www.ivoa.net/documents/VOSpace/20180620/REC-VOSpace-2.1.pdf>`_
+
+If you don't know what these standards are or how they fit in, don't worry!
+In the :ref:`Services <services-label>` section, I will outline where each of
+these come into play.
 
 What clients do we want to ensure compatibility with?
 -----------------------------------------------------
 
-Architecture Diagram
-====================
+Some clients and tools are just part of the general ecosystem of astronomy tools.
+We will need to support them.  We will also be building the SUIT (LSST Science
+Platform) on top of many of these services.  The portal and the notebook aspects
+will both be calling the services, and possibly passing IDs to async results
+between them.
+
+Here's a list of clients:
+
+- Science Platform / SUIT
+
+  - `Science Platform Design LDM-542 <https://ldm-542.lsst.io/LDM-542.pdf>`_
+
+  - `Science Platform Requirements LDM-554 <https://docushare.lsst.org/docushare/dsweb/Get/LDM-554/LDM-554.pdf>`_
+
+- `Tool for OPerations on Catalogues And Tables (TOPCAT) <http://www.star.bris.ac.uk/~mbt/topcat/>`_
+
+Architecture
+============
+
+Diagram
+-------
 
 Call Flows
 ----------
+
+Data Flows
+----------
+
+.. _services-label:
 
 Services
 ========
