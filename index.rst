@@ -36,7 +36,7 @@
 
    Feel free to delete this instructional comment.
 
-:tocdepth: 1
+:tocdepth: 2
 
 .. Please do not modify tocdepth; will be fixed when a new Sphinx theme is shipped.
 
@@ -203,8 +203,63 @@ Services
 Database Service
 ----------------
 
-Worker Service
-^^^^^^^^^^^^^^
+In this section I will describe the database service, it's interface
+and a suggested implementation.
+
+Database Service Interface
+--------------------------
+
+TAP 1.1 & VOTable
+^^^^^^^^^^^^^^^^^
+For querying the catalog that is hosted in QServ, we want to support
+Table Access Protocol (TAP) v1.1.  As outlined in the spec, TAP is a
+standard interface to provide a query (in ADQL) and return a table
+(usually VOTable) with the results of that query.
+
+The results are returned usually in VOTable format, which include
+metadata about the columns and datatypes in the table, as well as the
+data values.
+
+In order to run queries, we use the /sync, and /async endpoints, which
+are required parts of TAP 1.1.  There are other optional endpoints
+in the spec, such as /tables, /examples, and /capabilities.  For a chart
+that contains what is required reference page 10 of the TAP spec.
+
+Sync, Async, and UWS
+^^^^^^^^^^^^^^^^^^^^
+According to the standard, we need to provide endpoints to run queries
+either sync or async.  For queries submitted to the /sync endpoint, the
+service blocks and waits for the response to return to the caller in the
+response.  For /async, we can return an ID that can be queried in the
+future to determine the results.  This will be useful for long running
+queries where the query may take hours to run.  For /async queries, the
+spec requires us to implement the UWS standard.
+
+While the UWS standard does not specify how to run the jobs, it provides
+a RESTful way of accessing the state, checking results, and providing
+control over jobs, such as cancelling.
+
+TAP_SCHEMA
+^^^^^^^^^^
+
+The IVOA standards try to not only standardize access to data, but also
+the discovery of that data.  Section 4 of the TAP 1.1 spec outlines
+TAP_SCHEMA, which is required of TAP 1.1 implementations.  The idea is
+for a caller to be able to discover the schema of what we are serving
+(tables, columns, and data types) to craft their queries correctly.
+
+The further parts of section 4 of the TAP 1.1 spec (4.1, 4.2, 4.3, 4.4)
+outline the schema for database tables to be created that can hold
+metadata about the data that is accessible through the endpoint.
+
+To use this part of the service, you can submit a query through TAP,
+and the names of the metadata tables and columns are well known.  The
+results are returned in VOTable format like any other query.  In this
+clever usage, we can have one transport to tell us about the metadata
+as well as the data itself, using ADQL to query the metadata.
+
+Database Service Implementation
+-------------------------------
 
 Image Service
 -------------
