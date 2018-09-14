@@ -274,6 +274,20 @@ as well as protect their results from someone else trying to scoop their
 research.  Many IVOA standards come from the era of public astronomy data,
 so there may be some excitement here trying to add AAA to everything.
 
+
+.. note::
+
+    AAA needs a lot more work and deciding on hard requirements
+
+Since we are using UNIX groups and other very posix level permission
+schemes, we need to figure out how to respect these things in our Webservices,
+which aren't always impersonating the user.  For example, to get a result file,
+it'd be much easier to check the permissions rather than try to su to that
+user, and see if they still have access (which brings in things like ACLs, and
+UNIX group mechanics).  Depending on the level of auth required, we might be
+able to restrict this to the creator of the query, rather than their group.
+Either way, this will have to be determined.
+
 History Database
 ^^^^^^^^^^^^^^^^
 We want a history database of queries that can be looked through.  The
@@ -329,6 +343,10 @@ VOTable format.
 
 History Database
 ^^^^^^^^^^^^^^^^
+
+.. note::
+   We still need firm requirements on what the retention period and
+   auth scheme should be for accessing the history database.
 
 There are many data stores we could use for a history database.  Many
 might even be tied to the execution of async jobs.  For example, the
@@ -400,6 +418,16 @@ which is VOTable.  This may involve some coercing of data types to VOTable
 data types, rather than the original backend.  Once the result is written
 and in the correct format, we can record that the query is finished and
 the results are available.
+
+.. note::
+   QServ also supports an async query mode.  We should investigate this
+   to determine where it fits in with our plans.  Inevitably we will
+   have to gather the results, and put them in a VO compliant format.
+
+.. note::
+   We need to figure out how to properly impersonate the user making
+   the request.  Do we store their token, or use a service account and
+   su to them?
 
 Centralized Result Store
 ^^^^^^^^^^^^^^^^^^^^^^^^
