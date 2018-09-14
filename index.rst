@@ -237,7 +237,7 @@ spec requires us to implement the UWS standard.
 
 While the UWS standard does not specify how to run the jobs, it provides
 a RESTful way of accessing the state, checking results, and providing
-control over jobs, such as cancelling.
+control over jobs, such as canceling.
 
 TAP_SCHEMA
 ^^^^^^^^^^
@@ -258,8 +258,174 @@ results are returned in VOTable format like any other query.  In this
 clever usage, we can have one transport to tell us about the metadata
 as well as the data itself, using ADQL to query the metadata.
 
+LSST Specific Requirements
+--------------------------
+
+While not covered generally by any IVOA specific standard, there are
+a few things that we have as requirements that are more LSST specific.
+
+Authentication and Authorization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+LSST data is not all public, and scientists may have their own private
+datasets uploaded as well to do JOINS or other algorithmic analysis against.
+We need to be able to authorize each user to use the LSST DAC resources
+as well as protect their results from someone else trying to scoop their
+research.  Many IVOA standards come from the era of public astronomy data,
+so there may be some excitement here trying to add AAA to everything.
+
+History Database
+^^^^^^^^^^^^^^^^
+We want a history database of queries that can be looked through.  The
+UWS spec defines that there is a way to get a list of jobs, both pending
+and finished, so that is one way of accomplishing this goal.  Depending
+on how long we want to persist this data for, we might want to back up
+the queries, and index them in some other interesting way, probably through
+some other kind of ancillary service.
+
+Query text should be protected by auth to only allow a user to see their
+own queries.
+
+Large Result Sets
+^^^^^^^^^^^^^^^^^
+
+Since LSST queries may take a long time to run, and have large results
+sets, we need to be able to cache large results sets (up to 5 GB of
+results per query) for a reasonable period of time so they can be
+retrieved.  This may be on the other of a few days or a week, since
+some of the queries may be run overnight or over the weekend.
+
+These results must also be protected so that only the user executing
+the query can retrieve the results.  After the results are retrieved,
+that user can obviously do what they will with the results (such as
+share them).  While there are data rights implications here, once the
+data is out of our control, it's out of our control.
+
 Database Service Implementation
 -------------------------------
+
+Now that we've established the particulars of what we want, let's 
+dive into the implementation of this service now.
+
+This service needs to:
+
+1. Accept queries through a TAP compliant HTTP interface.
+2. Record the query in the query history.
+3. Determine what backend those queries should be dispatched to.
+4. Rewrite original ADQL query to the SQL variant of the backend.
+5. Dispatch the query, either locally or through a pool of workers.
+6. Gather results from the query, and transform them into VOTable.
+7. Put the results in a place that the user can download.
+
+TAP Compliant Interface
+^^^^^^^^^^^^^^^^^^^^^^^
+
+There are many ways to write a webservice these days, including many
+frameworks.  We know what URIs we want to serve, /sync and /async,
+and that we want to serve results in XML.  We need to really reference
+the TAP 1.1 spec for this part, implementing what we need to, such as
+parameters (LANG, QUERY, MAXREC) as well as wrapping the results in a
+VOTable format.
+
+History Database
+^^^^^^^^^^^^^^^^
+
+There are many data stores we could use for a history database.  Many
+might even be tied to the execution of async jobs.  For example, the
+distributed task framework celery uses RabbitMQ, Redis, MongoDB, to store
+results and execution status.  This isn't just used to query the history
+but to drive execution.  These databases can also be queried directly
+by users, or we can add additional URIs to look through the history.
+
+The UWS spec also mandates a way to list jobs, and get their results.
+This is fairly analogous to the history database functionality we want,
+as it lists the queries, their IDs, execution status, and result location.
+
+Determine the Backend
+^^^^^^^^^^^^^^^^^^^^^
+
+Many specs use the TAP and VOTable standards as a way of transmitting
+complex data.  For example, the TAP_SCHEMA table stores the metadata,
+and could be on a different backend than the catalog itself, which is
+hosted by QServ.  Some user generated (Level 3) data might also be
+present in another database, such as Oracle or Postgres.  There are
+also special tables for ObsTAP to look at image metadata.
+
+The tricky part here is that if one database isn't hosting all the tables,
+we need to inspect the query to determine what tables are being accessed,
+and then route the query to the appropriate backend.  Different backends
+might also have different load characteristics, such as the number of
+running queries.
+
+Query Rewriting
+^^^^^^^^^^^^^^^
+
+QServ doesn't speak ADQL.  Neither does Oracle.  We need to take the
+ADQL query, inspect it, and rewrite it to work on the individual backends.
+
+This may be to work around various quirks of different SQL variants and
+implementations (such as how keywords work, or the way of limiting results,
+or datatypes).
+
+There are also some extensions to do very astronomical things, such as
+cone and other spatial searches, as well as dealing with different
+coordinate systems.
+
+Query Dispatch
+^^^^^^^^^^^^^^
+
+Once we have the final query and we know where it's going, we are
+ready to send the rewritten query to the backend and start getting the
+results.  Since these results may be very large (GBs) or very small
+(0 or 1 rows), we need to be able to support both cases in a performant
+way.
+
+For sync queries, the caller simply waits on the HTTP connection until
+the results are available.  For async queries, since the caller will
+make another request, we need to ensure that these requests will always
+find the results, no matter how many TAP service copies we have.  This
+means we can't really store results locally on the TAP service disk
+(also this has the possibility of filling up the disk).  It is better
+to have a central disk or shared place, so that results can be written
+there, and then picked up by anyone handling getting the results.  This
+also helps with keeping results through upgrades and transient failures.
+
+It's also a good idea to separate out your front ends (things taking HTTP
+requests) from your back end workers (which dispatch to the database).
+This allows for a more even distribution of load across the workers, and
+keeping the load on the backends (which don't scale as easily) in check.
+
+As we gather these results, we need to put them also in the right format,
+which is VOTable.  This may involve some coercing of data types to VOTable
+data types, rather than the original backend.  Once the result is written
+and in the correct format, we can record that the query is finished and
+the results are available.
+
+Centralized Result Store
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+After the user has completed their query, they will want their results,
+which may be large.  They may be downloaded more than once, so we likely
+want to keep the results sets around for at least a few days, to prevent
+needing to rerun the same query on the database.
+
+Because of the diversity of queries and their results sizes, and not
+being able to know the size of the results from the query, we need to be
+careful about local resources.  If the results were stored on the TAP
+service nodes, we could easily fill up the disk of a kubernetes pod, which
+might be 100GB (or 20 results).  The fragmentation of splitting the load
+across multiple TAP service nodes might also be bad, since the sizes of
+the results might be uneven, filling up some nodes and leaving others
+empty.  We want to store all these in a central place, preferably with
+URL access, so we can serve the results file directly off disk.
+
+By having one place store the results, we eliminate the problem of the
+client needing to contact multiple servers to find the results,
+or the results not existing by the time the user checks for the results.
+
+This could easily be an S3 like object store, or an NFS volume with
+Apache or another web front end checking for auth on top.  Given that it
+is simply serving up static files, this part should be relatively easy.
 
 Image Service
 -------------
