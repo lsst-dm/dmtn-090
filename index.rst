@@ -149,9 +149,9 @@ Catalog oriented standards:
 
 Image oriented standards:
 
-- `SODA 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
-
 - `ObsTAP <http://www.ivoa.net/documents/ObsCore/20170509/REC-ObsCore-v1.1-20170509.pdf>`_
+
+- `SODA 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
 
 - `SIA 2.0 <http://www.ivoa.net/documents/SIA/20151223/REC-SIA-2.0-20151223.pdf>`_
 
@@ -197,8 +197,8 @@ Data Flows
 
 .. _services-label:
 
-Database Service Interface
-==========================
+Database Service
+================
 
 TAP 1.1 & VOTable
 -----------------
@@ -258,7 +258,7 @@ While not covered generally by any IVOA specific standard, there are
 a few things that we have as requirements that are more LSST specific.
 
 Authentication and Authorization
---------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 LSST data is not all public, and scientists may have their own private
 datasets uploaded as well to do JOINS or other algorithmic analysis against.
@@ -282,7 +282,7 @@ able to restrict this to the creator of the query, rather than their group.
 Either way, this will have to be determined.
 
 History Database
-----------------
+^^^^^^^^^^^^^^^^
 
 We want a history database of queries that can be looked through.  The
 UWS spec defines that there is a way to get a list of jobs, both pending
@@ -295,7 +295,7 @@ Query text should be protected by auth to only allow a user to see their
 own queries.
 
 Large Result Sets
------------------
+^^^^^^^^^^^^^^^^^
 
 Since LSST queries may take a long time to run, and have large results
 sets, we need to be able to cache large results sets (up to 5 GB of
@@ -449,15 +449,148 @@ This could easily be an S3 like object store, or an NFS volume with
 Apache or another web front end checking for auth on top.  Given that it
 is simply serving up static files, this part should be relatively easy.
 
-Image Service Interface
-=======================
+Image Service
+=============
+
+ObsTAP
+------
+
+ObsTAP is the way to query and determine metadata about image data.
+By using the same TAP / VOTable infrastructure from the database service,
+a user or client can craft a query against the available metadata to
+discover what images exist that fulfill those critiera.
+
+The types of queries that can be run are independent of the data being
+served - the standard dictates what tables and columns must exist to
+run queries against.  This helps general discoverability, as otherwise
+those tables would have to be described first (probably through TAP_SCHEMA),
+but by having a uniform data model, this allows one query to be run
+against multiple ObsTAP endpoints and have it work everywhere.
+
+In the ObsTAP spec, there are some great UML diagrams for the data model
+on page 13-15.  Then the data model is expanded further with tables describing
+the database metadata.  Table 1 has all the metadata that is absolutely
+required, containing the usual suspects such as observation id, time, type
+of data, ra, dec, are all there.  Section 4 on page 20 actually has the
+TAP_SCHEMA minimal set of fields and their datatypes that can easily be
+dumped right into TAP_SCHEMA.tables.
+
+For some of these fields, we will have one identifier that is present
+throughout, and mostly constant, such as instrument and type of data (image).
+For fields that change, such as RA/DEC we will need to present that as a 
+database table.  This can be the same backends that the Database Service
+uses for TAP_SCHEMA and other associated metadata.
+
+Two important basic fields are the access_url, and the access_format.  This
+tells the client what URL it can go to to retrieve the image, and what
+format (JPG, FITS) the image at that URL is encoded in.  The format is a
+standard MIME-type.
+
+Along with image metadata, ObsTAP also supports serving and querying
+provenance data, although it is not required.
+
+.. note::
+  Are we going to use ObsTAP to serve provenance data?
+
+SIA
+---
+
+SIA (Simple Image Access) is a simpler way than ObsTAP to discover
+images based on parameters the caller provides.  This isn't done in
+ADQL, but via a smaller list of parameter options. The SIA metadata
+model is the same as the ObsCore data model, and if we have a database
+of the ObsCore data model, it should be easy to field SIA queries
+against it.
+
+The types of query parameters of SIA are things like position, energy,
+time, and wavelengths.  There is a list of parameters in Section 2.1
+of the SIA spec, that outlines all the possible query parameters.
+
+SIA, unlike TAP, ObsTap, and SODA, only provides a sync endpoint called
+query, which takes a query string or post parameters, and returns a
+VOTable consistent with that of ObsTAP responses (Section 3.1 SIA spec).
+
+SODA
+----
+
+SODA (Server-side Operations for Data Access) is an IVOA standard
+that covers the processing of server side image data before returning
+it to the caller.  Since many of our image files are large, and the
+portion of the file that the caller may care about is small, this makes
+sense to be able to filter the data down on the server side to reduce
+the amount of data transferred, along with the latency and cost of
+such a transfer.
+
+By allowing a user to select positional regions using the POS argument,
+different regions can be selected, such as CIRCLE, RANGE, and user defined
+shapes via POLYGON.  To find the image with the correct filter, the user
+can use the BAND parameter, to provide a range of wavelengths to return.
+
+Like the TAP service, SODA specifies a sync an async resource, of which you
+need at least one.  Async behaves as a UWS service, just like TAP, and can
+provide an ID that can be later retrieved for large result sets.
+
+Depending on the arguments, one query can provide multiple image results,
+for example looking at multiple bands, or drawing multiple CIRCLEs.
+
+.. note::
+   It looks like SODA allows for us to also do our own custom parameters,
+   to allow for more operations to happen.  Other than the cutouts defined
+   by the spec, what server side transformations do we need?
+
+
+LSST Specific Requirements
+--------------------------
+
+Authentication and Authorization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Users will have to be authenticated, and authorized (with data rights)
+to query these services and retrieve image data.  This security model
+may be simpler to that of the TAP service, because people will likely
+not be uploading their own images to be served by the SIA, SODA, or ObsTAP
+interfaces.  This means that there is generally a consistent level of
+protection needed that does not vary per user - everyone has the same
+access to all the image data.
+
+That being said, ObsTAP does support a field called data_rights, which
+allows us to say that our dataset is either public, secure, or
+proprietary (ObsCore B.4.4).  This will likely be one flag per data
+release, which will either be proprietary, then public after it is
+released.
+
+History Database
+^^^^^^^^^^^^^^^^
+
+While it is not mentioned in the requirements, we might want to extend
+the idea of the history database to encompass queries to the image service,
+such as ObsTAP, SODA, and SIA queries.  Because of the authorization model
+outlined above, the results are less likely to need to be secured between
+users, allowing for caching and result reuse to be higher and easier to
+accomplish in a secure manner.
+
+Either way, we will want to audit the access logs to this service, and
+attempt to determine usage patterns, to improve performance.
+
+Large Result Sets
+^^^^^^^^^^^^^^^^^
+
+Because of the large size of the LSST data, including the images, we will
+want to ensure that queries are limited to a resonable number of results,
+to not put undue load onto the system.
+
+Since we have to support async queries to SODA, and because those jobs
+may take a while to run, it makes senes to use the same centralized results
+backend to store the data and provide URLs to objects in that backend.
+
+
+Implementation
+--------------
+
 
 
 Further considerations
 ======================
-
-Authentication and Authorization
---------------------------------
 
 Load and Failure Characteristics
 --------------------------------
