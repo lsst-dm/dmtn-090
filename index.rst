@@ -197,20 +197,12 @@ Data Flows
 
 .. _services-label:
 
-Services
-========
-
-Database Service
-----------------
-
-In this section I will describe the database service, it's interface
-and a suggested implementation.
-
 Database Service Interface
---------------------------
+==========================
 
 TAP 1.1 & VOTable
-^^^^^^^^^^^^^^^^^
+-----------------
+
 For querying the catalog that is hosted in QServ, we want to support
 Table Access Protocol (TAP) v1.1.  As outlined in the spec, TAP is a
 standard interface to provide a query (in ADQL) and return a table
@@ -226,7 +218,8 @@ in the spec, such as /tables, /examples, and /capabilities.  For a chart
 that contains what is required reference page 10 of the TAP spec.
 
 Sync, Async, and UWS
-^^^^^^^^^^^^^^^^^^^^
+--------------------
+
 According to the standard, we need to provide endpoints to run queries
 either sync or async.  For queries submitted to the /sync endpoint, the
 service blocks and waits for the response to return to the caller in the
@@ -240,7 +233,7 @@ a RESTful way of accessing the state, checking results, and providing
 control over jobs, such as canceling.
 
 TAP_SCHEMA
-^^^^^^^^^^
+----------
 
 The IVOA standards try to not only standardize access to data, but also
 the discovery of that data.  Section 4 of the TAP 1.1 spec outlines
@@ -265,7 +258,7 @@ While not covered generally by any IVOA specific standard, there are
 a few things that we have as requirements that are more LSST specific.
 
 Authentication and Authorization
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------
 
 LSST data is not all public, and scientists may have their own private
 datasets uploaded as well to do JOINS or other algorithmic analysis against.
@@ -289,7 +282,8 @@ able to restrict this to the creator of the query, rather than their group.
 Either way, this will have to be determined.
 
 History Database
-^^^^^^^^^^^^^^^^
+----------------
+
 We want a history database of queries that can be looked through.  The
 UWS spec defines that there is a way to get a list of jobs, both pending
 and finished, so that is one way of accomplishing this goal.  Depending
@@ -301,7 +295,7 @@ Query text should be protected by auth to only allow a user to see their
 own queries.
 
 Large Result Sets
-^^^^^^^^^^^^^^^^^
+-----------------
 
 Since LSST queries may take a long time to run, and have large results
 sets, we need to be able to cache large results sets (up to 5 GB of
@@ -315,8 +309,8 @@ that user can obviously do what they will with the results (such as
 share them).  While there are data rights implications here, once the
 data is out of our control, it's out of our control.
 
-Database Service Implementation
--------------------------------
+Implementation
+--------------
 
 Now that we've established the particulars of what we want, let's 
 dive into the implementation of this service now.
@@ -455,8 +449,9 @@ This could easily be an S3 like object store, or an NFS volume with
 Apache or another web front end checking for auth on top.  Given that it
 is simply serving up static files, this part should be relatively easy.
 
-Image Service
--------------
+Image Service Interface
+=======================
+
 
 Further considerations
 ======================
