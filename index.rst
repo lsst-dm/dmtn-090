@@ -458,7 +458,8 @@ ObsTAP
 ObsTAP is the way to query and determine metadata about image data.
 By using the same TAP / VOTable infrastructure from the database service,
 a user or client can craft a query against the available metadata to
-discover what images exist that fulfill those critiera.
+discover what images exist that fulfill those criteria, and retrieve
+the URL to access them.
 
 The types of queries that can be run are independent of the data being
 served - the standard dictates what tables and columns must exist to
@@ -483,8 +484,8 @@ uses for TAP_SCHEMA and other associated metadata.
 
 Two important basic fields are the access_url, and the access_format.  This
 tells the client what URL it can go to to retrieve the image, and what
-format (JPG, FITS) the image at that URL is encoded in.  The format is a
-standard MIME-type.
+format (JPG, FITS) the image at that URL is encoded in.  The format column
+is a string containing a standard MIME-type.
 
 Along with image metadata, ObsTAP also supports serving and querying
 provenance data, although it is not required.
@@ -509,6 +510,9 @@ of the SIA spec, that outlines all the possible query parameters.
 SIA, unlike TAP, ObsTap, and SODA, only provides a sync endpoint called
 query, which takes a query string or post parameters, and returns a
 VOTable consistent with that of ObsTAP responses (Section 3.1 SIA spec).
+The sync nature of the request/response is to retrieve a VOTable response,
+containing links to the images, not sync/async about image retrieval.
+This will be related to a point mentioned below about PVI availability.
 
 SODA
 ----
@@ -519,7 +523,10 @@ it to the caller.  Since many of our image files are large, and the
 portion of the file that the caller may care about is small, this makes
 sense to be able to filter the data down on the server side to reduce
 the amount of data transferred, along with the latency and cost of
-such a transfer.
+such a transfer.  Another common use case is to create a cutout that
+covers multiple raw images (such as PVIs) to create a mosaic image
+that has the cutout and has stitched together the edges of the
+individual images to create one seamless image.
 
 By allowing a user to select positional regions using the POS argument,
 different regions can be selected, such as CIRCLE, RANGE, and user defined
@@ -542,6 +549,45 @@ for example looking at multiple bands, or drawing multiple CIRCLEs.
 LSST Specific Requirements
 --------------------------
 
+Images we are serving
+^^^^^^^^^^^^^^^^^^^^^
+
+The standards mentioned previously can be used to host any particular
+image data, from any instrument.  For LSST, we have two types of images
+we'd like to serve through these endpoints and queries:
+
+  1. PVIs - Processed Visit Images
+  2. Multiple sets of coadds - Created by Coadding PVIs.
+
+Each of these will have images per band, and covering the LSST footprint.
+There are also multiple different sets of Coadds using different addition
+methods and selections of raw data.
+
+.. note::
+   How to multiple data releases come into play when handling image metadata?
+   Should this be a different dataset id?
+
+PVI Retention and Virtual Products
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Due to cost and space constraints, the current plan does not involve storing
+all the PVIs on disk.  There is only a 30 day moving window of availability
+for these images while they are processed and can be easily read off disk.
+
+After this 30 day window, additional work would need to happen to be able
+to recreate the PVI file, which could then be served to the caller.  This
+work would involve having to read off tape (or hopefully, a disk) the raw
+image components, then use the workflow system to tell it to create the
+PVIs.  While most of this logic is out of scope of this document, the
+important point is that this may take minutes and possibly even hours before
+an image can be served.
+
+This is also true of other processing intensive operations, such as looking
+at different sets of coadds that might not always be on disk.
+
+Because of these reasons, doing anything with images synchronously is
+probably a bad idea.
+
 Authentication and Authorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -551,7 +597,8 @@ may be simpler to that of the TAP service, because people will likely
 not be uploading their own images to be served by the SIA, SODA, or ObsTAP
 interfaces.  This means that there is generally a consistent level of
 protection needed that does not vary per user - everyone has the same
-access to all the image data.
+access to all the image data, as all the image data is covered by LSST
+data rights rules.
 
 That being said, ObsTAP does support a field called data_rights, which
 allows us to say that our dataset is either public, secure, or
@@ -572,31 +619,164 @@ accomplish in a secure manner.
 Either way, we will want to audit the access logs to this service, and
 attempt to determine usage patterns, to improve performance.
 
+.. note::
+   What are our requirements for public history of image requests?
+
 Large Result Sets
 ^^^^^^^^^^^^^^^^^
 
 Because of the large size of the LSST data, including the images, we will
-want to ensure that queries are limited to a resonable number of results,
+want to ensure that queries are limited to a reasonable number of results,
 to not put undue load onto the system.
 
 Since we have to support async queries to SODA, and because those jobs
-may take a while to run, it makes senes to use the same centralized results
+may take a while to run, it makes sense to use the same centralized results
 backend to store the data and provide URLs to objects in that backend.
 
+Image Metadata
+^^^^^^^^^^^^^^
+
+There will be a visit table that contains all the visits, and metadata
+about PVIs.  This would be ideal if it's in the ObsCoreDM format so it
+can directly be queried against using ObsTAP.  Even if it's not exactly
+in the same format, we'll need to provide some kind of ObsTAP compliant
+view of that data to allow for queries, since the metadata model has
+to be in a specific format to follow the standard.
+
+We will also need tables that contain the metadata about all the coadds,
+so they can also be discovered, even though it's not a visit at all, and
+therefore doesn't belong in the visit table.  We might have to virtually
+stitch these two tables (one containing PVI metadata, and one containing
+coadd metadata) together somehow to allow a unified interface for
+querying through one table.
+
+This metadata also needs to exist for things that aren't currently on disk,
+because they are virtual products.  The fact that they exist in this
+database lets us know that they can be created, and at one time, were
+created.  When someone queries these products, we need to create them
+on demand.
+
+.. note::
+   The current definition of the visit tables are on `Github <https://github.com/lsst/cat/blob/master/sql/baselineSchema.sql#L3046>`_
+
+   More time should be spent making sure that we have everything
+   we need in the visit metadata.
+
+
+.. note::
+   How are we currently planning on doing coadd metadata?
+
+   Seems like we might want to use a different dataset ID to refer
+   to coadds, as that is how SODA determines what raw images to use?
 
 Implementation
 --------------
 
+Querying Metadata and Image Discovery
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some of the implementation here gets to be shared with the Database Service,
+as ObsTAP is making sure that certain tables exist in a certain format and
+can be queried from our TAP service.
+
+First, we need to ensure that we have the proper metadata, and it is available
+via the standards compliant queries.  Then we use the same TAP service described
+as above, using its sync or async endpoints to retrieve a VOTable containing
+image metadata.  This image metadata contains URLs that can be used to access
+these images.
+
+For SIA compatibility, we can run this on top of the current ObsTAP implementation
+because for each SIA query it can be mapped into an ObsTAP query, and the
+response is of the same format (VOTable).  SIA only supports sync though, so it
+should only be for short queries.  Again, the sync part is only relating to the
+query, but the images might also not be available for some time, even if there
+is an access_link provided in the response.  This may break SIA clients.
+
+Retrieving Images
+^^^^^^^^^^^^^^^^^
+
+Now we know what images exist, the types and formats of those images, and we have
+URLs to query them.  Now we can either download PVIs or coadds, or do server side
+processing such as cutouts to receive a processed image via SODA on those PVIs or
+coadds.
+
+Both of these types of requests can be served by one service, and that server
+uses the Butler as its backend for retrieving images and doing simple processing
+such as cutouts.
+
+If the URL presented is not a SODA request, we can say that this is a request
+asking directly for a full image (either PVI or Coadd).  We use the URL to map
+this back to a way that the Butler can retrieve the image using its known mappings.
+Once we find the file on disk (or network disk), we serve it up directly to the
+user.  If the file doesn't exist, we can create it using the workflow engine, but
+the image might not be available for some time.  For direct GETs, we might need
+to use HTTP control to tell it to try again later, and that the image isn't ready
+yet.  Most of the standards assume images are all accessible in short order if
+they exist in the metadata.
+
+.. note::
+   For direct image access without processing, standards assume files are
+   available immediately, how do we do this async?
+
+If the URL is a SODA request, then we get to work.  First, we process the query
+and pass the parameters to the Butler, which will find the images, stitch
+them together, and attempt the cutout.  This may take time, because the PVIs or
+coadds virtually exist, be a request that covers a large space, or has multiple
+cutouts requested.
+
+SODA allows for async operations though, so we know we can tell our caller to
+call again later to get their result no matter how long it takes.
+
+Because the resulting files can be large, we can upload or copy them to shared
+storage in an object store, and have the image server redirect HTTP requests
+for finished work items to their URL in the object store.  In this way, we can
+split up the workers and the servers and scale them up and down independently.
+
+Performance, Load, and Failure Characteristics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For the image metadata portion of the system, these queries will be run against
+the TAP service, and have the same performance and load characteristics as noted
+in that section.
+
+For the image retrieval and processing portion of the image service, we have it
+a bit easier.  Much of the performance will be related to the speed of access
+to images, and if they already exist or are virtual products.  For the files
+that exist, we will need to copy them off of a network share, which is a shared
+resource, which could be a bottleneck under heavy load.
+
+Processing for creating virtual products will likely involve the workflow engine,
+and having to be queued and executed there.  This is also a shared resource, so
+depending on load from other portions of the system, this could be slow and add
+latency to the end user.
+
+For processing cutouts and doing mosaics, we will likely use the Butler and
+local CPU processing to create those products.  This means we need to provision
+the CPU correctly - not too small so that big jobs take a long time, but not
+having a lot of unused resources on a worker.  If we have workers that have too
+much CPU, we could always reduce the CPU requirements for each worker and have
+more workers to increase throughput.
+
+Since the image service is just a proxy and processing layer on top of the
+existing data, there is no risk that the image server could destroy or lose data.
+The data is persisted at a lower level and the image server doesn't require
+permissions to delete data.  If the service goes down, the problem is that the
+data is inaccessible until it is restored.  If the service itself doesn't have
+to handle persistent storage (using an object store instead), then we don't
+have to worry about persisting previous results between deploys.
 
 
 Further considerations
 ======================
 
-Load and Failure Characteristics
---------------------------------
+Deployment
+----------
 
-Testing and Operations
-----------------------
+Testing
+-------
+
+Operations
+----------
 
 .. .. rubric:: References
 
