@@ -1,52 +1,10 @@
-..
-  Technote content.
-
-  See https://developer.lsst.io/restructuredtext/style.html
-  for a guide to reStructuredText writing.
-
-  Do not put the title, authors or other metadata in this document;
-  those are automatically added.
-
-  Use the following syntax for sections:
-
-  Sections
-  ========
-
-  and
-
-  Subsections
-  -----------
-
-  and
-
-  Subsubsections
-  ^^^^^^^^^^^^^^
-
-  To add images, add the image file (png, svg or jpeg preferred) to the
-  _static/ directory. The reST syntax for adding the image is
-
-  .. figure:: /_static/filename.ext
-     :name: fig-label
-
-     Caption text.
-
-   Run: ``make html`` and ``open _build/html/index.html`` to preview your work.
-   See the README at https://github.com/lsst-sqre/lsst-technote-bootstrap or
-   this repo's README for more info.
-
-   Feel free to delete this instructional comment.
-
 :tocdepth: 2
 
 .. Please do not modify tocdepth; will be fixed when a new Sphinx theme is shipped.
 
 .. sectnum::
 
-.. TODO: Delete the note below before merging new content to the master branch.
-
 .. note::
-
-   **This technote is not yet published.**
 
    Implementation guide for DAX Webservices.
 
@@ -192,8 +150,82 @@ Diagram
 Call Flows
 ----------
 
-Data Flows
-----------
+Catalog Query
+^^^^^^^^^^^^^
+
+
+#. Submit the ADQL Query to the TAP service endpoint via HTTP POST
+   and receives a query ID to check for results.
+
+#. Database service parses the query to determine the backend for the
+   ADQL.
+
+#. Request is created and put on the work queue.
+
+#. UWS worker dispatches the query and gathers results.
+
+#. Worker massages data into the correct format and marks the request
+   complete.
+
+#. Caller uses the URL and ID to be redirected to the results file.
+
+
+Catalog Metadata Query
+^^^^^^^^^^^^^^^^^^^^^^
+
+Same as a normal catalog query, but the query uses the
+TAP_SCHEMA tables stored in the Oracle database.
+
+Image Metadata Query
+^^^^^^^^^^^^^^^^^^^^
+
+Same as a normal catalog query, but the query uses standard
+tables that contain image metadata stored in the Oracle
+database.  The result is a VOTable with metadata and access URLs.
+
+Image Retrieval
+^^^^^^^^^^^^^^^
+
+#. Caller uses an Image Metadata Query to determine images they
+   want to retrieve.
+
+#. Caller makes another HTTP get to the URLs returned from the
+   Image Metadata Query.
+
+#. Image Service creates a ID, and puts the request on the work queue.
+
+#. Image Service Worker picks up the request and uses the Butler to see
+   if that file exists.
+
+#. If the file does not exist, Image Service recreates that file
+   by using the workflow engine.
+
+#. Once the file exists, the file is put in the object store and
+   the worker marks the request as complete.
+
+#. Caller is redirected to the object store URL.
+
+Image Cutouts
+^^^^^^^^^^^^^
+
+#. Caller uses an Image Metadata Query to determine datasets
+   and particular images they might want cutouts of.
+
+#. Caller makes a SODA request to the Image Service with
+   parameters that determine positions and shapes of cutouts.
+
+#. Image Service creates an ID and puts the request on the work queue.
+
+#. Image Service Worker picks up the work and  uses the Butler to 
+   gather and create image files it needs to process the request.
+
+#. Worker uses the Butler to create cutouts on those images.
+
+#. Worker uploads result to object store and marks request as complete.
+
+#. Caller uses the ID to check for results, and is redirected
+   to the object store URL of the result.
+
 
 .. _services-label:
 
@@ -257,6 +289,27 @@ LSST Specific Requirements
 While not covered generally by any IVOA specific standard, there are
 a few things that we have as requirements that are more LSST specific.
 
+QServ
+^^^^^
+
+QServ is our custom scalable database for distributed hosting of data
+release catalogs.  QServ is based on top of MariaDB with customizations.
+QServ has some special performance characteristics, but to us, it means
+we mostly need to be compliant with its SQL variant, and be able to
+transform ADQL into QServ SQL.  QServ also has special functionality to
+do full table scans, and some special endpoints to allow for queries to
+run async and retrieve the results later on.
+
+No JOINs Across Databases
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+While TAP will present the tables from QServ and Oracle as one large
+unified table space, we can't allow for people to do SQL JOINS between
+them.  If we wanted to support this, it would be very complicated, so
+for now this is out of scope.  If you need to do some joins, query each
+table with a different query and then JOIN it yourself by iterating
+through the data.
+
 Authentication and Authorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -272,7 +325,7 @@ so there may be some excitement here trying to add AAA to everything.
 
     AAA needs a lot more work and deciding on hard requirements
 
-Since we are using UNIX groups and other very posix level permission
+Since we are using UNIX groups and other very POSIX level permission
 schemes, we need to figure out how to respect these things in our Webservices,
 which aren't always impersonating the user.  For example, to get a result file,
 it'd be much easier to check the permissions rather than try to su to that
@@ -434,8 +487,8 @@ needing to rerun the same query on the database.
 Because of the diversity of queries and their results sizes, and not
 being able to know the size of the results from the query, we need to be
 careful about local resources.  If the results were stored on the TAP
-service nodes, we could easily fill up the disk of a kubernetes pod, which
-might be 100GB (or 20 results).  The fragmentation of splitting the load
+service nodes, we could easily fill up the local disk, which may be as
+few as 20 results for 100 GB.  The fragmentation of splitting the load
 across multiple TAP service nodes might also be bad, since the sizes of
 the results might be uneven, filling up some nodes and leaving others
 empty.  We want to store all these in a central place, preferably with
@@ -448,6 +501,47 @@ or the results not existing by the time the user checks for the results.
 This could easily be an S3 like object store, or an NFS volume with
 Apache or another web front end checking for auth on top.  Given that it
 is simply serving up static files, this part should be relatively easy.
+
+Performance, Load, and Failure Characteristics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The performance characteristics of the database server should be
+fairly straightforward, at least compared to what it is built on
+top of and completely depends on.
+
+The overhead of processing a request, parsing the query, putting
+it in ADQL, and dispatching it to the server should be very quick
+compared to running the query.  This time should be fairly constant
+no matter what the query is.
+
+Running a query is completely dependent on the query (which we
+don't control) and the database (which we depend on, but don't
+control).  Things like the load on the shared database resources
+from other users and other queries can't really be predicted.
+
+The DAX webservices can be good stewards of these shared resources.
+By having a work queue with a consistent maximum number of queries
+in flight, we can provide an orderly way to access a limited resource,
+without overloading it.  There is usually a sweet spot in terms of
+performance, where you are fully using your resources, but not thrashing,
+that we will hopefully discover and tune our system accordingly.
+
+The overhead of processing the response is certainly higher than
+that of the request.  Having to take an up to 5 GB file and transmute
+it from database rows into a VOTable or other format can be costly.
+The latency involved in such large transfers is also not to be ignored.
+Given that we know we have a 5 GB limit on query responses, we can
+ensure that our portion of the processing of the results will generally
+have a fixed upper bound.
+
+Because the database service doesn't have much internal state, and has
+no important data to lose, the failure characteristics are straightforward.
+We might fail the request, and have to retry it, or lose a result.  Since
+we cannot keep all results for all time, it's inevitable that some results
+will be unavailable after a period, and tools will simply rerun the query.
+Transitive failures can be retried if desired, but not required.
+
+
 
 Image Service
 =============
@@ -769,14 +863,38 @@ have to worry about persisting previous results between deploys.
 Further considerations
 ======================
 
-Deployment
-----------
+Deployment and Operations
+-------------------------
+
+Since both the image service and the database service don't require
+a lot of state, we can easily run multiple copies of all the services
+at once.  These different instances can be different versions and
+isolated from each other.
+
+This means that to help do upgrades and deployments, we could easily
+keep the current version running, deploy the new version and do
+checkouts and testing, then update the nginx ingress rules to point
+to the new version.  This means we don't have to take downtime to do
+a deployment.
+
+The state that may make this tricky are the requests that are
+queued or in-flight, and the history database itself.  For requests
+that are already satisfied, but having their data put in the object
+store, the results are still accessible even if the service instance
+that created it might be taken down.
+
+For requests that are queued, they will simply be delayed.  For
+in-flight requests, we can either drain the worker pool (stop taking
+new requests, finish what you have), or just kill the workers and
+have an automatic retry for failures that look like they are technology
+related (disk issues, network reconnects, etc.).
+
+If we want to do none of these, any user or client can simply re-run
+the query and we will start over again from scratch.
 
 Testing
 -------
 
-Operations
-----------
 
 .. .. rubric:: References
 
