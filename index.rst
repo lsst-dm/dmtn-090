@@ -147,6 +147,10 @@ Architecture
 Diagram
 -------
 
+.. figure:: /_static/dax-diagram.png
+
+    Architecture Diagram for DAX Webservices.
+
 Call Flows
 ----------
 
@@ -519,7 +523,7 @@ don't control) and the database (which we depend on, but don't
 control).  Things like the load on the shared database resources
 from other users and other queries can't really be predicted.
 
-The DAX webservices can be good stewards of these shared resources.
+The DAX Webservices can be good stewards of these shared resources.
 By having a work queue with a consistent maximum number of queries
 in flight, we can provide an orderly way to access a limited resource,
 without overloading it.  There is usually a sweet spot in terms of
@@ -895,6 +899,87 @@ the query and we will start over again from scratch.
 Testing
 -------
 
+Testing the services should be fairly straightforward.  There are a
+few types of testing we need to consider:
+
+#. Standards compatibility testing - we need to be compliant to the standard.
+
+#. Query testing - testing normal paths and edge cases via specific targeted
+   queries.
+
+#. Robustness - ensuring our services operate normally and have good
+   availability.
+
+Due to the nature of being a generally stateless proxy, most tests for testing
+standards compatibility and individual queries can be done anywhere, and are
+easily repeatable and reproducible.  While some of these standards are complex,
+they generally don't have a lot of API surface area (endpoints to call).
+Combined with being stateless, this means we should be able to easily
+reproduce issues if we have the query string, even on another test instance
+from production.
+
+For standards testing, at least against TAP, there is `taplint
+<http://www.star.bris.ac.uk/~mbt/stilts/sun256/taplint.html>`_, which
+should be able to help test against the standard.
+
+For query testing, we should try to run some queries that we think will be
+common for the use cases of the science platform.  As people report issues
+using the platform, we should be logging the query string and result codes.
+Any queries that fail due to some bug should be investigated, and that
+particular query string can be added to a list of tests to run to check
+for regressions.  Since each test is essentially just a query, and making
+sure the response hasn't changed, we can use a hash of the results, or
+check the results for particular fields to validate that it is the same.
+
+One type of testing that may have timing issues in it is the general robustness.
+We need to make sure things like deploys and upgrades work without issue, and
+hopefully, without downtime.  As nodes go down in our kubernetes cluster, or
+we scale up or down, we may run into bugs and issues, especially with
+kubernetes like things.  These should be worked through with help of NCSA or
+the kubernetes admins.
+
+Retention Policy of Results
+---------------------------
+
+Currently the retention policy for results has not be defined and no
+requirements have been proposed.  Obviously we need to retain results
+at least until the user has had a chance to retrieve them.  Once the
+result has been obtained, the user may need to retrieve it again for
+some reason.  Given that it may have taken hours to comb through the
+large LSST dataset, we might not want to throw away that result so
+quickly.
+
+On the other hand, with large (5 GB) result files, we can't just keep
+all the results of all time.  There needs to be a balance.
+
+There are some obvious ways of doing this:
+
+#. Have enough disk space to comfortably have a window of X days
+   before your result is deleted.  X could be 5 days, a month, etc.
+   We probably won't know until we know the usage pattern, as if there
+   are a lot of queries in a short time, we might exhaust our space
+   before X days is up.
+
+#. Keep X GBs of past results.  This way you can expire results that
+   are the oldest first, and keep our cache at a constant size.  This
+   implies that all the users are in the same bin, so if one user is
+   making most of the queries, they will take most of the cache.  But
+   assuming they are using all these query results for doing good things,
+   that is probably the most efficient way.
+
+#. X GBs per user.  We could do this, but it's likely that we won't have
+   a disk big enough to have all users at full quota.  Like a gym, we have
+   to assume some people won't use their allotment.
+
+It's likely we'll have some kind of combination of business rules of these
+strategies, and we want to keep this as an operational sidecar script that
+can be easily tweaked and run by hand if necessary.  If we use an object
+store, this can easily be run with appropriate credentials against the object
+store to clean it out on demand, or even hand pick certain results to
+delete.
+
+.. note::
+   These are just guesses. Determine actual requirements here.
 
 .. .. rubric:: References
 
