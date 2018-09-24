@@ -304,15 +304,20 @@ transform ADQL into QServ SQL.  QServ also has special functionality to
 do full table scans, and some special endpoints to allow for queries to
 run async and retrieve the results later on.
 
-No JOINs Across Databases
-^^^^^^^^^^^^^^^^^^^^^^^^^
+No JOINs Across QServ and Oracle
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 While TAP will present the tables from QServ and Oracle as one large
 unified table space, we can't allow for people to do SQL JOINS between
-them.  If we wanted to support this, it would be very complicated, so
+them.
+
+If we wanted to support this, it would be very complicated, so
 for now this is out of scope.  If you need to do some joins, query each
 table with a different query and then JOIN it yourself by iterating
-through the data.
+through the data on the application side.
+
+JOINs should be supported on all Oracle or all QServ tables though.  Just
+JOINs between them will be disallowed.
 
 Authentication and Authorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
