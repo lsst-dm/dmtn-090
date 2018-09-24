@@ -32,10 +32,17 @@ technology like the Butler for finding FITS files on networked disks, and
 querying our distributed database, QServ, which hosts our catalog.
 
 The Butler and QServ are both very purpose built to support scientific
-processing and analysis of the LSST dataset, and aren't intended
-to be generic across different observatories or telescopes (though some parts
-may be), whereas the DAX Webservices are intended to be a layer that
-provides a generic interface on top.
+processing and analysis of the LSST dataset, and are designed to be generic,
+but aren't required to use IVOA standards.  These tools also aren't designed
+to be webservices, but to be run by the scientists or automation directly.
+
+The fact that they aren't webservices means they use things like POSIX
+file permissions on local disk mounts, and are running already in a
+specific user context.  Webservices operate differently, for example
+taking auth headers in each request to verify permissions.  The DAX
+Webservices will provide such a wrapper to run a service, utilizing
+not only Butler and QServ, but other local services, to provide an
+IVOA compliant interface for clients.
 
 Many times, the DAX Webservices will use the LSST specific toolchain to
 back the processing of requests.  For example, to do image cutouts,
