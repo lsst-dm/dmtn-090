@@ -16,18 +16,18 @@ Abstract
 
 This document outlines the purpose, reasoning, and suggested implementation
 of the DAX Webservices.  The DAX Webservices are the way to get LSST data through
-a set of IVOA compliant services that will allow any tool or client supporting
+a set of IVOA-compliant services that will allow any tool or client supporting
 IVOA standards to query and retrieve data.
 
 Having Standards
 ================
 
-The purpose of the DAX Webservices is to provide an IVOA compliant interface
+The purpose of the DAX Webservices is to provide an IVOA-compliant interface
 to access LSST data, both catalog data (and its metadata) as well as image
 data.
 
 In the DAX Webservices, we are taking the LSST tools and stack, and
-providing a view that IVOA compliant tools can use.  The LSST way involves
+providing a view that IVOA-compliant tools can use.  The LSST way involves
 technology like the Butler for finding FITS files on networked disks, and
 querying our distributed database, QServ, which hosts our catalog.
 
@@ -42,7 +42,7 @@ specific user context.  Webservices operate differently, for example
 taking auth headers in each request to verify permissions.  The DAX
 Webservices will provide such a wrapper to run a service, utilizing
 not only Butler and QServ, but other local services, to provide an
-IVOA compliant interface for clients.
+IVOA-compliant interface for clients.
 
 Many times, the DAX Webservices will use the LSST specific toolchain to
 back the processing of requests.  For example, to do image cutouts,
@@ -50,7 +50,7 @@ the image service will likely need to use the Butler to find the raw
 images, as well as do cutouts and other operations on the raw images,
 before sending them back in a compliant format.
 
-For IVOA compliant catalog access, the standards revolve around TAP (Table
+For IVOA-compliant catalog access, the standards revolve around TAP (Table
 Access Protocol) and VOTable to represent the results.  The language
 of TAP queries is ADQL, which is SQL-like, but has some differences between
 the variant of SQL that QServ.  The DAX Webservices must rewrite the query
@@ -94,7 +94,7 @@ may be nice, but these must be measured against the impact of implementing more
 of the IVOA standards, which will be used by more tools rather than just our
 custom LSST tools.
 
-What standards to we want to support?
+What standards do we want to support?
 -------------------------------------
 
 We will implement an interface that supports these standards.  Links
@@ -106,24 +106,35 @@ Catalog oriented standards:
 
 - `TAP 1.1 <http://www.ivoa.net/documents/TAP/20170830/PR-TAP-1.1-20170830.pdf>`_
 
-- `VOTable 1.3 <http://www.ivoa.net/documents/VOTable/20130920/REC-VOTable-1.3-20130920.pdf>`_
-
-- `Universal Worker Service (UWS) 1.1 <http://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.pdf>`_
-
 - `ADQL 2.0 <http://www.ivoa.net/documents/REC/ADQL/ADQL-20081030.pdf>`_
+
 
 Image oriented standards:
 
-- `ObsTAP <http://www.ivoa.net/documents/ObsCore/20170509/REC-ObsCore-v1.1-20170509.pdf>`_
+- `ObsTAP and ObsCore <http://www.ivoa.net/documents/ObsCore/20170509/REC-ObsCore-v1.1-20170509.pdf>`_
 
-- `SODA 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
+- `Server-side Operations for Data Access (SODA) 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
 
-- `SIA 2.0 <http://www.ivoa.net/documents/SIA/20151223/REC-SIA-2.0-20151223.pdf>`_
+- `Simple Image Access (SIA) 2.0 <http://www.ivoa.net/documents/SIA/20151223/REC-SIA-2.0-20151223.pdf>`_
+
+- `Hierarchical Progressive Survey (HiPS) 1.0 <http://www.ivoa.net/documents/HiPS/20170519/REC-HIPS-1.0-20170519.pdf>`_
 
 
 User storage standards:
 
 - `VOSpace 2.1 <http://www.ivoa.net/documents/VOSpace/20180620/REC-VOSpace-2.1.pdf>`_
+
+
+Underpinnings:
+
+- `VOTable 1.3 <http://www.ivoa.net/documents/VOTable/20130920/REC-VOTable-1.3-20130920.pdf>`_
+
+- `Universal Worker Service (UWS) 1.1 <http://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.pdf>`_
+
+- `Data Access Layer Interface (DALI) 1.1 <http://www.ivoa.net/documents/DALI/20170517/REC-DALI-1.1.pdf>`_
+
+- `IVOA Support Interfaces (VOSI) 1.1 <http://www.ivoa.net/documents/VOSI/20170524/REC-VOSI-1.1.pdf>`_
+
 
 If you don't know what these standards are or how they fit in, don't worry!
 In the :ref:`Services <services-label>` section, I will outline where each of
@@ -165,7 +176,7 @@ Catalog Query
 ^^^^^^^^^^^^^
 
 
-#. Submit the ADQL Query to the TAP service endpoint via HTTP POST
+#. Submit the ADQL Query to the TAP service endpoint via HTTPS POST
    and receives a query ID to check for results.
 
 #. Database service parses the query to determine the backend for the
@@ -175,7 +186,7 @@ Catalog Query
 
 #. UWS worker dispatches the query and gathers results.
 
-#. Worker massages data into the correct format and marks the request
+#. Worker massages data into the requested format and marks the request
    complete.
 
 #. Caller uses the URL and ID to be redirected to the results file.
@@ -200,7 +211,7 @@ Image Retrieval
 #. Caller uses an Image Metadata Query to determine images they
    want to retrieve.
 
-#. Caller makes another HTTP get to the URLs returned from the
+#. Caller makes another HTTPS GET to the URLs returned from the
    Image Metadata Query.
 
 #. Image Service creates a ID, and puts the request on the work queue.
@@ -247,9 +258,10 @@ TAP 1.1 & VOTable
 -----------------
 
 For querying the catalog that is hosted in QServ, we want to support
-Table Access Protocol (TAP) v1.1.  As outlined in the spec, TAP is a
-standard interface to provide a query (in ADQL) and return a table
-(usually VOTable) with the results of that query.
+Table Access Protocol (TAP) v1.1.  
+As outlined in the spec, TAP is a standard interface to execute a
+query (specified as ADQL) and return a table (usually VOTable) with
+the results of that query.
 
 The results are returned usually in VOTable format, which include
 metadata about the columns and datatypes in the table, as well as the
@@ -386,7 +398,7 @@ dive into the implementation of this service now.
 
 This service needs to:
 
-1. Accept queries through a TAP compliant HTTP interface.
+1. Accept queries through a TAP-compliant HTTPS interface.
 2. Record the query in the query history.
 3. Determine what backend those queries should be dispatched to.
 4. Rewrite original ADQL query to the SQL variant of the backend.
@@ -394,7 +406,7 @@ This service needs to:
 6. Gather results from the query, and transform them into VOTable.
 7. Put the results in a place that the user can download.
 
-TAP Compliant Interface
+TAP-Compliant Interface
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 There are many ways to write a webservice these days, including many
@@ -485,7 +497,7 @@ the results are available.
 .. note::
    QServ also supports an async query mode.  We should investigate this
    to determine where it fits in with our plans.  Inevitably we will
-   have to gather the results, and put them in a VO compliant format.
+   have to gather the results, and put them in an IVOA-compliant format.
 
 .. note::
    We need to figure out how to properly impersonate the user making
@@ -749,7 +761,7 @@ Image Metadata
 There will be a visit table that contains all the visits, and metadata
 about PVIs.  This would be ideal if it's in the ObsCoreDM format so it
 can directly be queried against using ObsTAP.  Even if it's not exactly
-in the same format, we'll need to provide some kind of ObsTAP compliant
+in the same format, we'll need to provide some kind of ObsTAP-compliant
 view of that data to allow for queries, since the metadata model has
 to be in a specific format to follow the standard.
 
@@ -790,7 +802,7 @@ as ObsTAP is making sure that certain tables exist in a certain format and
 can be queried from our TAP service.
 
 First, we need to ensure that we have the proper metadata, and it is available
-via the standards compliant queries.  Then we use the same TAP service described
+via the standards-compliant queries.  Then we use the same TAP service described
 as above, using its sync or async endpoints to retrieve a VOTable containing
 image metadata.  This image metadata contains URLs that can be used to access
 these images.
@@ -953,7 +965,7 @@ the kubernetes admins.
 Retention Policy of Results
 ---------------------------
 
-Currently the retention policy for results has not be defined and no
+Currently the retention policy for results has not been defined and no
 requirements have been proposed.  Obviously we need to retain results
 at least until the user has had a chance to retrieve them.  Once the
 result has been obtained, the user may need to retrieve it again for
