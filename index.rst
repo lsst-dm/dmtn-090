@@ -15,47 +15,72 @@ Abstract
 ========
 
 This document outlines the purpose, reasoning, and suggested implementation
-of the DAX Webservices.  The DAX Webservices are the way to get LSST data through
-a set of IVOA compliant services that will allow any tool or client supporting
+of the DAX Webservices.
+The DAX Webservices are the way to get LSST data through a set of (primarily)
+IVOA-compliant services that will allow any tool or client supporting
 IVOA standards to query and retrieve data.
+
+Within the context of the LSST Science Platform (LSP), the DAX Webservices are
+the key component of the LSP's API Aspect, are the principal means for making
+LSST data available to the Portal Aspect, and play an important role in
+supplying LSST catalog data to the the Notebook Aspect.
 
 Having Standards
 ================
 
-The purpose of the DAX Webservices is to provide an IVOA compliant interface
-to access LSST data, both catalog data (and its metadata) as well as image
-data.
+The purpose of the DAX Webservices is to provide an IVOA-compliant interface
+to access LSST data, both catalogs and their metadata (including semantic
+annotation and provenance), and images and their metadata (including
+observation records and provenance)
 
 In the DAX Webservices, we are taking the LSST tools and stack, and
-providing a view that IVOA compliant tools can use.  The LSST way involves
-technology like the Butler for finding FITS files on networked disks, and
-querying our distributed database, QServ, which hosts our catalog.
+exposing a view based on network protocols that IVOA-compliant tools can use.
+The underlying LSST tools include technology like the Butler for finding
+data (e.g., FITS files) on disks, managing associations between datasets,
+and serialization of the LSST Python object model; the Science Pipelines
+code for astronomical computations; and our distributed, spatially sharded
+database, QServ, for querying our primary astronomical catalogs.
 
-The Butler and QServ are both very purpose built to support scientific
-processing and analysis of the LSST dataset, and are designed to be generic,
-but aren't required to use IVOA standards.  These tools also aren't designed
-to be webservices, but to be run by the scientists or automation directly.
+The Butler and QServ are purpose-built to meet the requirements of the
+scientific processing and analysis of the LSST dataset, and yet are designed
+to be generic and applicable to other dataset.
+However, they are not designed to meet the IVOA standards, and they do not
+themselves provide Web services.
+They will serve as the underpinnings of our implementations of the Web
+services, however, as well as fulfilling their other roles in supporting
+production pipelines and individual scientists' investigations.
 
-The fact that they aren't webservices means they use things like POSIX
+The fact that they aren't webservices means they rely on things like POSIX
 file permissions on local disk mounts, and are running already in a
 specific user context.  Webservices operate differently, for example
 taking auth headers in each request to verify permissions.  The DAX
 Webservices will provide such a wrapper to run a service, utilizing
 not only Butler and QServ, but other local services, to provide an
-IVOA compliant interface for clients.
+IVOA-compliant interface for clients.
 
-Many times, the DAX Webservices will use the LSST specific toolchain to
-back the processing of requests.  For example, to do image cutouts,
-the image service will likely need to use the Butler to find the raw
-images, as well as do cutouts and other operations on the raw images,
-before sending them back in a compliant format.
+Many times, the DAX Webservices will use the LSST Science Pipelines'
+specific toolchains to back the processing of requests.
+For example, to do image cutouts,
+the image service will likely need to use the Butler to find the
+persisted calibrated images (single-epoch PVIs or coadds),
+then use the Science Pipelines to do cutouts and other operations on the
+images, before sending them back in the format required by the IVOA
+protocol being used.
 
-For IVOA compliant catalog access, the standards revolve around TAP (Table
+For IVOA-compliant catalog access, the standards revolve around TAP (Table
 Access Protocol) and VOTable to represent the results.  The language
-of TAP queries is ADQL, which is SQL-like, but has some differences between
-the variant of SQL that QServ.  The DAX Webservices must rewrite the query
-appropriately before dispatching it to QServ and awaiting the result. QServ
-also has a specific way of doing async queries relating to shared scans.
+of TAP queries is the IVOA-specified ADQL, which is based on SQL92
+with significant extensions to support spherical geometry.
+The underlying SQL variant has some differences with the native ones of
+the databases used in LSST's QServ system, as well as in the project's
+more conventional (currently Oracle) RDBMS systems.
+The DAX Webservices must rewrite the ADQL queries appropriately to match
+the native SQL dialect and translate the spatial extensions to QServ's
+native spatial functions before dispatching them to QServ and awaiting
+the result.
+QServ also has a specific way of handling long-running asynchronous
+queries ("shared scans") which must be translated to the query lifetime
+management model of the IVOA standards.
 
 In the following sections, I will outline the standards we intend to
 implement, how we might implement them, and where the tricky parts may be.
@@ -68,7 +93,8 @@ multi-messenger astronomy and cross-referencing datasets of multiple
 instruments, one way needed to be created to standardize access to the
 data.  Otherwise, every time a new telescope is created, owners and maintainers
 of astronomy tools would have to add support for the new telescope, taking
-into account the idiosyncratic nature of that particular instrument.
+into account the idiosyncratic nature and interfaces of that particular
+instrument.
 
 By providing one standard way of doing it, we allow for one tool to use
 data from multiple instruments.  We can also use tools developed before LSST,
@@ -94,11 +120,15 @@ may be nice, but these must be measured against the impact of implementing more
 of the IVOA standards, which will be used by more tools rather than just our
 custom LSST tools.
 
-What standards to we want to support?
+Because of the importance of our data to the community, and the unprecendented
+scale of the dataset, LSST is in a position to work with the IVOA to evolve
+the standards over time when we find that they don't meet our needs.
+
+What standards do we want to support?
 -------------------------------------
 
-We will implement an interface that supports these standards.  Links
-are provided to give a reference set of versions to allow people to
+We will implement an interface that supports the following standards.
+Links are provided to give a reference set of versions to allow people to
 communicate about sections and page numbers of each particular
 specification:
 
@@ -106,24 +136,35 @@ Catalog oriented standards:
 
 - `TAP 1.1 <http://www.ivoa.net/documents/TAP/20170830/PR-TAP-1.1-20170830.pdf>`_
 
-- `VOTable 1.3 <http://www.ivoa.net/documents/VOTable/20130920/REC-VOTable-1.3-20130920.pdf>`_
-
-- `Universal Worker Service (UWS) 1.1 <http://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.pdf>`_
-
 - `ADQL 2.0 <http://www.ivoa.net/documents/REC/ADQL/ADQL-20081030.pdf>`_
+
 
 Image oriented standards:
 
-- `ObsTAP <http://www.ivoa.net/documents/ObsCore/20170509/REC-ObsCore-v1.1-20170509.pdf>`_
+- `ObsTAP and ObsCore <http://www.ivoa.net/documents/ObsCore/20170509/REC-ObsCore-v1.1-20170509.pdf>`_
 
-- `SODA 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
+- `Server-side Operations for Data Access (SODA) 1.0 <http://www.ivoa.net/documents/SODA/20170604/REC-SODA-1.0.pdf>`_
 
-- `SIA 2.0 <http://www.ivoa.net/documents/SIA/20151223/REC-SIA-2.0-20151223.pdf>`_
+- `Simple Image Access (SIA) 2.0 <http://www.ivoa.net/documents/SIA/20151223/REC-SIA-2.0-20151223.pdf>`_
+
+- `Hierarchical Progressive Survey (HiPS) 1.0 <http://www.ivoa.net/documents/HiPS/20170519/REC-HIPS-1.0-20170519.pdf>`_
 
 
 User storage standards:
 
 - `VOSpace 2.1 <http://www.ivoa.net/documents/VOSpace/20180620/REC-VOSpace-2.1.pdf>`_
+
+
+Underpinnings:
+
+- `VOTable 1.3 <http://www.ivoa.net/documents/VOTable/20130920/REC-VOTable-1.3-20130920.pdf>`_
+
+- `Universal Worker Service (UWS) 1.1 <http://www.ivoa.net/documents/UWS/20161024/REC-UWS-1.1-20161024.pdf>`_
+
+- `Data Access Layer Interface (DALI) 1.1 <http://www.ivoa.net/documents/DALI/20170517/REC-DALI-1.1.pdf>`_
+
+- `IVOA Support Interfaces (VOSI) 1.1 <http://www.ivoa.net/documents/VOSI/20170524/REC-VOSI-1.1.pdf>`_
+
 
 If you don't know what these standards are or how they fit in, don't worry!
 In the :ref:`Services <services-label>` section, I will outline where each of
@@ -148,6 +189,25 @@ Here's a list of clients:
 
 - `Tool for OPerations on Catalogues And Tables (TOPCAT) <http://www.star.bris.ac.uk/~mbt/topcat/>`_
 
+- `Aladin Desktop <https://aladin.u-strasbg.fr/AladinDesktop/>`_
+
+Note that the LSST requirement for authenticated access to all data
+(discussed further below) is exploring an area that is not well-supported
+by existing tools, and that does not have a clear community consensus on
+the choice of standards.
+As a result, LSST expects to have to work with the external tool
+community to help them make their tools capable of working with our
+authentication system and be able to access our data.
+
+We also wish to facilitate other astronomical archives in making the LSST data
+accessible, via IVOA-standard interfaces, through their portals, so that it can
+be used in conjunction with other datasets of value to the community.
+Similarly, a virtue of building the LSST Science Platform's tools, such as the
+Portal Aspect and the Python interfaces in the Notebook Aspect, around IVOA
+standard is that this enables those tools to be used to bring in additional
+data to the Science Platform environment.
+
+
 Architecture
 ============
 
@@ -164,18 +224,20 @@ Call Flows
 Catalog Query
 ^^^^^^^^^^^^^
 
+(Based on the asynchronous flavor of the TAP interface.)
 
-#. Submit the ADQL Query to the TAP service endpoint via HTTP POST
+#. Caller submits an ADQL Query to the TAP service endpoint via HTTPS POST
    and receives a query ID to check for results.
 
-#. Database service parses the query to determine the backend for the
-   ADQL.
+#. Database service parses the query to determine the back end for the
+   query, based on the tables selected, and translates the ADQL to the
+   back end's native query language.
 
 #. Request is created and put on the work queue.
 
 #. UWS worker dispatches the query and gathers results.
 
-#. Worker massages data into the correct format and marks the request
+#. Worker massages data into the requested format and marks the request
    complete.
 
 #. Caller uses the URL and ID to be redirected to the results file.
@@ -187,12 +249,21 @@ Catalog Metadata Query
 Same as a normal catalog query, but the query uses the
 TAP_SCHEMA tables stored in the Oracle database.
 
+
 Image Metadata Query
 ^^^^^^^^^^^^^^^^^^^^
 
 Same as a normal catalog query, but the query uses standard
 tables that contain image metadata stored in the Oracle
-database.  The result is a VOTable with metadata and access URLs.
+database.
+An image metadata query can be a normal ADQL TAP query against the
+native LSST metadata, or against LSST's CAOM2 data model tables.
+It can also be an ObsTAP query (i.e., ADQL against the basic table
+defined in the ObsCore standard), or it can be done via the
+simplified SIA protocol.
+In each case, the result is a VOTable with image metadata and
+corresponding access URLs.
+
 
 Image Retrieval
 ^^^^^^^^^^^^^^^
@@ -200,7 +271,7 @@ Image Retrieval
 #. Caller uses an Image Metadata Query to determine images they
    want to retrieve.
 
-#. Caller makes another HTTP get to the URLs returned from the
+#. Caller makes another HTTPS GET to the URLs returned from the
    Image Metadata Query.
 
 #. Image Service creates a ID, and puts the request on the work queue.
@@ -208,8 +279,10 @@ Image Retrieval
 #. Image Service Worker picks up the request and uses the Butler to see
    if that file exists.
 
-#. If the file does not exist, Image Service recreates that file
-   by using the workflow engine.
+#. If the file does not exist, but is recreatable as a virtual data
+   product from underlying data, the Image Service recreates that file
+   by using the workflow engine to execute the appropriate Science
+   Pipelines code.
 
 #. Once the file exists, the file is put in the object store and
    the worker marks the request as complete.
@@ -227,10 +300,11 @@ Image Cutouts
 
 #. Image Service creates an ID and puts the request on the work queue.
 
-#. Image Service Worker picks up the work and  uses the Butler to 
+#. Image Service Worker picks up the work and uses the Butler to
    gather and create image files it needs to process the request.
 
-#. Worker uses the Butler to create cutouts on those images.
+#. Worker uses the appropriate Science Pipelines code to create
+   cutouts on those images.
 
 #. Worker uploads result to object store and marks request as complete.
 
@@ -247,33 +321,58 @@ TAP 1.1 & VOTable
 -----------------
 
 For querying the catalog that is hosted in QServ, we want to support
-Table Access Protocol (TAP) v1.1.  As outlined in the spec, TAP is a
-standard interface to provide a query (in ADQL) and return a table
-(usually VOTable) with the results of that query.
+Table Access Protocol (TAP) v1.1.
+As outlined in the spec, TAP is a standard interface to execute a
+query (specified as ADQL) and return a table (usually VOTable) with
+the results of that query.
 
-The results are returned usually in VOTable format, which include
-metadata about the columns and datatypes in the table, as well as the
-data values.
+When the results are returned in the IVOA standard VOTable format,
+the service can provide extensive metadata about the columns and
+datatypes in the table, as well as the data values.
+This metadata can then be used to provide intelligent behavior in
+client tools and libraries.
+This is planned to be exploited in the LSST Science Platform.
 
-In order to run queries, we use the /sync, and /async endpoints, which
-are required parts of TAP 1.1.  There are other optional endpoints
-in the spec, such as /tables, /examples, and /capabilities.  For a chart
-that contains what is required reference page 10 of the TAP spec.
+In order to run queries, we use the ``/sync``, and ``/async`` endpoints,
+which are required parts of TAP 1.1.
+There are other optional endpoints
+in the spec, such as ``/tables``, ``/examples``, and ``/capabilities``.
+For a chart that contains what is required reference page 10 of the
+TAP spec.
+
+Because of the size of the query results expected for the LSST data
+and the comparative verbosity of the VOTable data format, LSST has
+explored offering a more efficient structure and table payload format
+than those available in VOTable, possibly involving the use of JSON
+for metadata and special file formats for the bulk data.
+However, LSST must in any event support VOTable for compatibility
+with the standards and with community tools.
 
 Sync, Async, and UWS
 --------------------
 
 According to the standard, we need to provide endpoints to run queries
-either sync or async.  For queries submitted to the /sync endpoint, the
-service blocks and waits for the response to return to the caller in the
-response.  For /async, we can return an ID that can be queried in the
-future to determine the results.  This will be useful for long running
-queries where the query may take hours to run.  For /async queries, the
-spec requires us to implement the UWS standard.
+either sync or async.
+These endpoints may be named ``/sync`` and ``/async`` or may have other
+names, especially in the case of authenticated services, as long as
+they are documented in the service's self-description.
+For queries submitted to a sync-like endpoint, the service blocks and
+waits for the response to return to the caller in the response.
+For async-like queries, the service is required to return an ID that
+can be referenced in the future to determine the query status and
+obtain its results.
+This is particularly useful for long running queries where the query
+may take hours to run, such as QServ shared scans.
 
+The UWS standard provides the details on how to structure the
+endpoints that provide the ID and allow further interaction with it.
 While the UWS standard does not specify how to run the jobs, it provides
 a RESTful way of accessing the state, checking results, and providing
 control over jobs, such as canceling.
+
+The LSST Science Platform design expects to make heavy use of
+asynchronous queries in order to permit queries to be launched from
+one of its Aspects and then located and accessed from another Aspect.
 
 TAP_SCHEMA
 ----------
@@ -281,18 +380,29 @@ TAP_SCHEMA
 The IVOA standards try to not only standardize access to data, but also
 the discovery of that data.  Section 4 of the TAP 1.1 spec outlines
 TAP_SCHEMA, which is required of TAP 1.1 implementations.  The idea is
-for a caller to be able to discover the schema of what we are serving
-(tables, columns, and data types) to craft their queries correctly.
+for a caller to be able to discover the schema of the data available
+for query (tables, columns, data types, and cross-table relationships)
+to craft their queries correctly.
+This supports the construction of client tools that can provide a
+user-friendly query front end to any properly self-documenting TAP
+service.
 
-The further parts of section 4 of the TAP 1.1 spec (4.1, 4.2, 4.3, 4.4)
-outline the schema for database tables to be created that can hold
-metadata about the data that is accessible through the endpoint.
+The subsequent parts of section 4 of the TAP 1.1 spec (4.1, 4.2, 4.3, 4.4)
+outline the schema for the metadata database tables that provide this
+service self-description.
 
 To use this part of the service, you can submit a query through TAP,
-and the names of the metadata tables and columns are well known.  The
-results are returned in VOTable format like any other query.  In this
-clever usage, we can have one transport to tell us about the metadata
-as well as the data itself, using ADQL to query the metadata.
+against metadata tables whose names and column structure are specified
+by the standard.
+The results are returned in VOTable format like any other query.
+In this clever usage, we can have one transport to tell us about the
+metadata as well as the data itself, using ADQL to query the metadata.
+
+The population of the TAP_SCHEMA tables from the LSST data model is
+itself a non-trivial task.
+The "Science Data Model" work currently in progress may result in a
+machine-readable version of the data model which could be parsed to
+yield the appropriate content for the TAP_SCHEMA tables.
 
 LSST Specific Requirements
 --------------------------
@@ -304,12 +414,28 @@ QServ
 ^^^^^
 
 QServ is our custom scalable database for distributed hosting of data
-release catalogs.  QServ is based on top of MariaDB with customizations.
-QServ has some special performance characteristics, but to us, it means
-we mostly need to be compliant with its SQL variant, and be able to
-transform ADQL into QServ SQL.  QServ also has special functionality to
-do full table scans, and some special endpoints to allow for queries to
-run async and retrieve the results later on.
+release catalogs.
+QServ is based on top of MariaDB with customizations to support
+efficient queries against spatially organized data in spherical geometry.
+QServ has some special performance characteristics, but from the
+perspective of the DAX services, it means we mostly need to be compliant
+with its SQL variant and its geometry functions, and be able to
+transform ADQL into QServ SQL.
+QServ also has special functionality to do full table scans, allowing
+multiple queries to be run simultaneously ("shared scans"),
+support for fault-tolerance through maintaining redundant copies of
+the distributed data,
+and some special endpoints to allow for queries to
+run async with users able to retrieve the results later on.
+
+Tables in QServ can either be "spatially sharded", with their content
+distributed across its many database workers according to a tiling of
+the two-dimensional sky, or, for smaller tables, replicated across all
+workers.
+Tables of both types can be combined in JOINs, but spatially sharded
+tables can only be joined "locally" within shards, supporting the query
+of relationships between spatially nearby catalog entries.
+
 
 No JOINs Across QServ and Oracle
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -326,15 +452,26 @@ through the data on the application side.
 JOINs should be supported on all Oracle or all QServ tables though.  Just
 JOINs between them will be disallowed.
 
+In order to partially work around this restriction, certain tables,
+including for example key image and visit metadata tables, are expected
+to be made available in both database systems.
+This facilitates their use in JOINs in both contexts.
+
 Authentication and Authorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-LSST data is not all public, and scientists may have their own private
-datasets uploaded as well to do JOINS or other algorithmic analysis against.
+The primary released LSST data will not be world-public at the time of
+release (see LPM-261 for more details).
+In addition, scientists may have their own private datasets uploaded as
+well to do JOINS or other algorithmic analysis against.
 We need to be able to authorize each user to use the LSST DAC resources
-as well as protect their results from someone else trying to scoop their
-research.  Many IVOA standards come from the era of public astronomy data,
-so there may be some excitement here trying to add AAA to everything.
+as well as protect their results and query history from someone else
+trying to scoop their research.
+Many IVOA standards come from the era of public astronomy data,
+so although there is some support for authentication and authorization
+in the standards (e.g., in the "Single-Sign-On Profile: Authentication
+Mechanisms" document), there may be some excitement here trying to add
+AAA to everything.
 
 
 .. note::
@@ -363,6 +500,60 @@ some other kind of ancillary service.
 Query text should be protected by auth to only allow a user to see their
 own queries.
 
+Retention of a history entry does not imply retention of the *results* of
+a query.
+We expect to retain query results for a relatively short time, both to
+facilitate users in obtaining results from long-running queries without
+setting an overly narrow window for them to respond to a notification of
+a completed query, and to enable workflows that begin in one LSP Aspect and
+continue in another.
+However, we expect to retain query texts and other records of the execution
+of a query for much longer, possibly unlimited, periods.
+The UWS standard on which the TAP protocol rests makes provision for this
+situation by defining an ARCHIVED state for queries post-execution in which
+the query results are no longer available but other information, including
+the query parameters, is retained.
+
+.. note::
+
+    It is not clear what to do about retention of the tables supplied by
+    users via the UPLOAD parameter of the TAP service, as these could be
+    very large, yet in a formal sense are part of the query specification.
+
+The existence of the history database serves a number of purposes in the
+LSST Science Platform:
+
+- It is useful in its own right for users to be able to understand the
+  evolution of their data accesses.
+
+- It provides one of the two means of transfer of a query workflow from
+  one LSP Aspect to another; users can perform actions such as "show me
+  the results of my last query", or review recent queries, in order to
+  find a query started in one Aspect in another Aspect.
+
+- It provides support for the repetition and reproducibility of queries.
+  Of particular interest for the continuously evolving Prompt data products,
+  the information in the query history database enables a user to re-run a
+  query either so as to reproduce its results as if at the time of the
+  original query, or to re-run it afresh including newly released data.
+
+History editing
+"""""""""""""""
+
+It may be useful to provide a means for users to mark history entries, such
+as those from queries that turn out to be mistakes or otherwise not useful,
+as "hidden" (from themselves) in order to make it possible for a default
+display of a query history to be "clean" and populated only with worthwhile
+entries.
+It would also be useful to allow the metadata queries performed by the LSP
+Portal Aspect as part of its self-configuration to be hidden by default,
+as it is possible that its activities may generate large numbers of small
+queries, particularly against the TAP_SCHEMA tables.
+This may suggest that at least a three-level "visibility" parameter may be
+appropriate for the query history database (normal, user-hidden,
+system-hidden), though in all cases users should be able to see their
+entire history upon explicit request.
+
 Large Result Sets
 ^^^^^^^^^^^^^^^^^
 
@@ -381,12 +572,12 @@ data is out of our control, it's out of our control.
 Implementation
 --------------
 
-Now that we've established the particulars of what we want, let's 
+Now that we've established the particulars of what we want, let's
 dive into the implementation of this service now.
 
 This service needs to:
 
-1. Accept queries through a TAP compliant HTTP interface.
+1. Accept queries through a TAP-compliant HTTPS interface.
 2. Record the query in the query history.
 3. Determine what backend those queries should be dispatched to.
 4. Rewrite original ADQL query to the SQL variant of the backend.
@@ -394,7 +585,7 @@ This service needs to:
 6. Gather results from the query, and transform them into VOTable.
 7. Put the results in a place that the user can download.
 
-TAP Compliant Interface
+TAP-Compliant Interface
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 There are many ways to write a webservice these days, including many
@@ -421,12 +612,16 @@ by users, or we can add additional URIs to look through the history.
 The UWS spec also mandates a way to list jobs, and get their results.
 This is fairly analogous to the history database functionality we want,
 as it lists the queries, their IDs, execution status, and result location.
+It may be useful to structure a more general query-history-query service
+in a way that returns the same basic data structures as the bare-bones
+UWS job list.
 
 Determine the Backend
 ^^^^^^^^^^^^^^^^^^^^^
 
 Many specs use the TAP and VOTable standards as a way of transmitting
-complex data.  For example, the TAP_SCHEMA table stores the metadata,
+complex data.
+For example, the TAP_SCHEMA tables store the semantic metadata,
 and could be on a different backend than the catalog itself, which is
 hosted by QServ.  Some user generated (Level 3) data might also be
 present in another database, such as Oracle or Postgres.  There are
@@ -451,6 +646,8 @@ or datatypes).
 There are also some extensions to do very astronomical things, such as
 cone and other spatial searches, as well as dealing with different
 coordinate systems.
+Different back ends may have very different ways to implement these
+spherical geometry constructs.
 
 Query Dispatch
 ^^^^^^^^^^^^^^
@@ -481,16 +678,21 @@ which is VOTable.  This may involve some coercing of data types to VOTable
 data types, rather than the original backend.  Once the result is written
 and in the correct format, we can record that the query is finished and
 the results are available.
+The "Science Data Model" and its record of the intended data types of the
+catalog data may be of use in determining the correct VOTable data types
+to be used, rather than simply inferring them from the underlying database
+data types.
 
 .. note::
    QServ also supports an async query mode.  We should investigate this
    to determine where it fits in with our plans.  Inevitably we will
-   have to gather the results, and put them in a VO compliant format.
+   have to gather the results, and put them in an IVOA-compliant format.
 
 .. note::
    We need to figure out how to properly impersonate the user making
    the request.  Do we store their token, or use a service account and
    su to them?
+
 
 Centralized Result Store
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -588,7 +790,7 @@ dumped right into TAP_SCHEMA.tables.
 
 For some of these fields, we will have one identifier that is present
 throughout, and mostly constant, such as instrument and type of data (image).
-For fields that change, such as RA/DEC we will need to present that as a 
+For fields that change, such as RA/DEC, we will need to present that as a
 database table.  This can be the same backends that the Database Service
 uses for TAP_SCHEMA and other associated metadata.
 
@@ -749,7 +951,7 @@ Image Metadata
 There will be a visit table that contains all the visits, and metadata
 about PVIs.  This would be ideal if it's in the ObsCoreDM format so it
 can directly be queried against using ObsTAP.  Even if it's not exactly
-in the same format, we'll need to provide some kind of ObsTAP compliant
+in the same format, we'll need to provide some kind of ObsTAP-compliant
 view of that data to allow for queries, since the metadata model has
 to be in a specific format to follow the standard.
 
@@ -790,7 +992,7 @@ as ObsTAP is making sure that certain tables exist in a certain format and
 can be queried from our TAP service.
 
 First, we need to ensure that we have the proper metadata, and it is available
-via the standards compliant queries.  Then we use the same TAP service described
+via the standards-compliant queries.  Then we use the same TAP service described
 as above, using its sync or async endpoints to retrieve a VOTable containing
 image metadata.  This image metadata contains URLs that can be used to access
 these images.
@@ -953,7 +1155,7 @@ the kubernetes admins.
 Retention Policy of Results
 ---------------------------
 
-Currently the retention policy for results has not be defined and no
+Currently the retention policy for results has not been defined and no
 requirements have been proposed.  Obviously we need to retain results
 at least until the user has had a chance to retrieve them.  Once the
 result has been obtained, the user may need to retrieve it again for
