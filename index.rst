@@ -31,7 +31,7 @@ Having Standards
 The purpose of the DAX Webservices is to provide an IVOA-compliant interface
 to access LSST data, both catalogs and their metadata (including semantic
 annotation and provenance), and images and their metadata (including
-observation records and provenance)
+observation records and provenance).
 
 In the DAX Webservices, we are taking the LSST tools and stack, and
 exposing a view based on network protocols that IVOA-compliant tools can use.
@@ -50,14 +50,6 @@ They will serve as the underpinnings of our implementations of the Web
 services, however, as well as fulfilling their other roles in supporting
 production pipelines and individual scientists' investigations.
 
-The fact that they aren't webservices means they rely on things like POSIX
-file permissions on local disk mounts, and are running already in a
-specific user context.  Webservices operate differently, for example
-taking auth headers in each request to verify permissions.  The DAX
-Webservices will provide such a wrapper to run a service, utilizing
-not only Butler and QServ, but other local services, to provide an
-IVOA-compliant interface for clients.
-
 Many times, the DAX Webservices will use the LSST Science Pipelines'
 specific toolchains to back the processing of requests.
 For example, to do image cutouts,
@@ -68,16 +60,19 @@ images, before sending them back in the format required by the IVOA
 protocol being used.
 
 For IVOA-compliant catalog access, the standards revolve around TAP (Table
-Access Protocol) and VOTable to represent the results.  The language
-of TAP queries is the IVOA-specified ADQL, which is based on SQL92
-with significant extensions to support spherical geometry.
-The underlying SQL variant has some differences with the native ones of
-the databases used in LSST's QServ system, as well as in the project's
+Access Protocol) and VOTable to represent the results.  While the TAP
+standard is technically language agnostic (via the LANG parameter),
+it is most often used with ADQL, the IVOA standard query language, which
+is based on SQL92 with significant extensions to support spherical geometry.
+The underlying SQL variant has some differences with the variants used
+by the databases used in LSST's QServ system, as well as in the project's
 more conventional (currently Oracle) RDBMS systems.
-The DAX Webservices must rewrite the ADQL queries appropriately to match
-the native SQL dialect and translate the spatial extensions to QServ's
-native spatial functions before dispatching them to QServ and awaiting
-the result.
+The TAP service must rewrite the ADQL queries appropriately to match
+the native SQL dialect and spatial function library.  Both QServ and the
+LSST consolidated database (Oracle) have spatial function libraries that
+have completely different and unrelated syntax.  The queries are then
+dispatched to their database and results are collected and presented to
+the caller in the VOTable format.
 QServ also has a specific way of handling long-running asynchronous
 queries ("shared scans") which must be translated to the query lifetime
 management model of the IVOA standards.
@@ -90,26 +85,24 @@ Why are standards important?
 
 Astronomers have been writing code for quite a long time.  In the era of
 multi-messenger astronomy and cross-referencing datasets of multiple
-instruments, one way needed to be created to standardize access to the
-data.  Otherwise, every time a new telescope is created, owners and maintainers
-of astronomy tools would have to add support for the new telescope, taking
-into account the idiosyncratic nature and interfaces of that particular
-instrument.
+instruments, access to the data needed to be standardized.
 
-By providing one standard way of doing it, we allow for one tool to use
+By agreeing upon a standard, we allow for one tool to use
 data from multiple instruments.  We can also use tools developed before LSST,
 unchanged, to access LSST data if we want.  This allows for astronomers
 to have working, tested tools before our telescope is even ready for this level
 of integration testing.
 
-There are many things about the standards that I find confusing, or disagree
-with.  But like the law, the standard is the standard.  I'm no fan of XML, but
-it is better to support the standard and not love it, than try and break bad.
+There are many things about the standards that I find confusing or
+disagreeable. But like the law, the standard is the standard.  I'm no fan of
+XML, but it is better to support the standard and not love it,
+than try and break bad.
 
-Each time the standard is not followed, there may be features or unintended
-consequences in 3rd party tools.  For example, if an unknown state was returned
-from an API, or a required key was missing, each tool will respond and error
-in its own way.  Some may stop working, some may ignore it, some may outright
+Each time the standard is not followed, features may be broken or unintended
+consequences appear in 3rd party tools.  For example, if an unknown state
+was returned from an API, or a required key was missing, each tool will
+respond and error in its own way.
+Some may stop working, some may ignore it, some may outright
 crash or throw an exception.  Tools differ in their access patterns even
 using a standard, so we also need to do compatibility testing with tools we
 want to officially support for our users.
@@ -154,6 +147,8 @@ User storage standards:
 
 - `VOSpace 2.1 <http://www.ivoa.net/documents/VOSpace/20180620/REC-VOSpace-2.1.pdf>`_
 
+- `WebDAV <https://en.wikipedia.org/wiki/WebDAV>`_
+
 
 Underpinnings:
 
@@ -173,11 +168,10 @@ these come into play.
 What clients do we want to ensure compatibility with?
 -----------------------------------------------------
 
-Some clients and tools are just part of the general ecosystem of astronomy tools.
+Some clients and tools are integral to the general ecosystem of astronomy tools.
 We will need to support them.  We will also be building the SUIT (LSST Science
-Platform) on top of many of these services.  The portal and the notebook aspects
-will both be calling the services, and possibly passing IDs to async results
-between them.
+Platform) on top of these services.  The portal and notebook aspects
+will be calling the services, and passing IDs to async results between them.
 
 Here's a list of clients:
 
@@ -190,6 +184,10 @@ Here's a list of clients:
 - `Tool for OPerations on Catalogues And Tables (TOPCAT) <http://www.star.bris.ac.uk/~mbt/topcat/>`_
 
 - `Aladin Desktop <https://aladin.u-strasbg.fr/AladinDesktop/>`_
+
+- `astroquery <https://github.com/astropy/astroquery>`_
+
+- `pyvo <https://github.com/pyvirtobs/pyvo>`_
 
 Note that the LSST requirement for authenticated access to all data
 (discussed further below) is exploring an area that is not well-supported
@@ -229,9 +227,9 @@ Catalog Query
 #. Caller submits an ADQL Query to the TAP service endpoint via HTTPS POST
    and receives a query ID to check for results.
 
-#. Database service parses the query to determine the back end for the
+#. TAP service parses the query to determine the back end for the
    query, based on the tables selected, and translates the ADQL to the
-   back end's native query language.
+   database's native query language.
 
 #. Request is created and put on the work queue.
 
@@ -247,15 +245,14 @@ Catalog Metadata Query
 ^^^^^^^^^^^^^^^^^^^^^^
 
 Same as a normal catalog query, but the query uses the
-TAP_SCHEMA tables stored in the Oracle database.
+TAP_SCHEMA tables stored in the database.
 
 
 Image Metadata Query
 ^^^^^^^^^^^^^^^^^^^^
 
 Same as a normal catalog query, but the query uses standard
-tables that contain image metadata stored in the Oracle
-database.
+tables that contain image metadata stored in a backend database.
 An image metadata query can be a normal ADQL TAP query against the
 native LSST metadata, or against LSST's CAOM2 data model tables.
 It can also be an ObsTAP query (i.e., ADQL against the basic table
@@ -271,8 +268,8 @@ Image Retrieval
 #. Caller uses an Image Metadata Query to determine images they
    want to retrieve.
 
-#. Caller makes another HTTPS GET to the URLs returned from the
-   Image Metadata Query.
+#. Caller makes another HTTPS GET to each URL returned from the
+   Image Metadata Query.  For each URL:
 
 #. Image Service creates a ID, and puts the request on the work queue.
 
@@ -323,8 +320,8 @@ TAP 1.1 & VOTable
 For querying the catalog that is hosted in QServ, we want to support
 Table Access Protocol (TAP) v1.1.
 As outlined in the spec, TAP is a standard interface to execute a
-query (specified as ADQL) and return a table (usually VOTable) with
-the results of that query.
+query (which for us will be ADQL) and return a table (usually VOTable)
+with the results of that query.
 
 When the results are returned in the IVOA standard VOTable format,
 the service can provide extensive metadata about the columns and
@@ -378,7 +375,7 @@ TAP_SCHEMA
 ----------
 
 The IVOA standards try to not only standardize access to data, but also
-the discovery of that data.  Section 4 of the TAP 1.1 spec outlines
+the discovery of the data schema.  Section 4 of the TAP 1.1 spec outlines
 TAP_SCHEMA, which is required of TAP 1.1 implementations.  The idea is
 for a caller to be able to discover the schema of the data available
 for query (tables, columns, data types, and cross-table relationships)
@@ -440,7 +437,7 @@ of relationships between spatially nearby catalog entries.
 No JOINs Across QServ and Oracle
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-While TAP will present the tables from QServ and Oracle as one large
+While TAP may present the tables from QServ and Oracle as one large
 unified table space, we can't allow for people to do SQL JOINS between
 them.
 
@@ -449,8 +446,8 @@ for now this is out of scope.  If you need to do some joins, query each
 table with a different query and then JOIN it yourself by iterating
 through the data on the application side.
 
-JOINs should be supported on all Oracle or all QServ tables though.  Just
-JOINs between them will be disallowed.
+JOINs should be supported on all Oracle or all QServ tables in an
+instance.  JOINs between database instances them will be disallowed.
 
 In order to partially work around this restriction, certain tables,
 including for example key image and visit metadata tables, are expected
@@ -487,6 +484,10 @@ UNIX group mechanics).  Depending on the level of auth required, we might be
 able to restrict this to the creator of the query, rather than their group.
 Either way, this will have to be determined.
 
+Results might also be stored over VOSpace directly into a
+user's home directory.  This means we also need a security model that allows
+for user impersonation through web services.
+
 History Database
 ^^^^^^^^^^^^^^^^
 
@@ -495,7 +496,9 @@ UWS spec defines that there is a way to get a list of jobs, both pending
 and finished, so that is one way of accomplishing this goal.  Depending
 on how long we want to persist this data for, we might want to back up
 the queries, and index them in some other interesting way, probably through
-some other kind of ancillary service.
+some other kind of ancillary service.  It is possible LSST will archive
+all query history over all time, though this may not all be available
+to the user.
 
 Query text should be protected by auth to only allow a user to see their
 own queries.
@@ -512,13 +515,7 @@ of a query for much longer, possibly unlimited, periods.
 The UWS standard on which the TAP protocol rests makes provision for this
 situation by defining an ARCHIVED state for queries post-execution in which
 the query results are no longer available but other information, including
-the query parameters, is retained.
-
-.. note::
-
-    It is not clear what to do about retention of the tables supplied by
-    users via the UPLOAD parameter of the TAP service, as these could be
-    very large, yet in a formal sense are part of the query specification.
+the query parameters, execution time, and other metadata, is retained.
 
 The existence of the history database serves a number of purposes in the
 LSST Science Platform:
@@ -558,9 +555,9 @@ Large Result Sets
 ^^^^^^^^^^^^^^^^^
 
 Since LSST queries may take a long time to run, and have large results
-sets, we need to be able to cache large results sets (up to 5 GB of
-results per query) for a reasonable period of time so they can be
-retrieved.  This may be on the other of a few days or a week, since
+sets, we need to be able to temporarily store large results sets
+(up to 5 GB of results per query) for a reasonable period of time before
+retrieval.  This may be on the other of a few days or a week, since
 some of the queries may be run overnight or over the weekend.
 
 These results must also be protected so that only the user executing
@@ -595,12 +592,13 @@ the TAP 1.1 spec for this part, implementing what we need to, such as
 parameters (LANG, QUERY, MAXREC) as well as wrapping the results in a
 VOTable format.
 
+There are also some open source TAP services that are promising.
+As of the time of writing, we are currently using the open source
+CADC TAP service, which is already being used in production for
+astronomy archives.
+
 History Database
 ^^^^^^^^^^^^^^^^
-
-.. note::
-   We still need firm requirements on what the retention period and
-   auth scheme should be for accessing the history database.
 
 There are many data stores we could use for a history database.  Many
 might even be tied to the execution of async jobs.  For example, the
@@ -615,6 +613,14 @@ as it lists the queries, their IDs, execution status, and result location.
 It may be useful to structure a more general query-history-query service
 in a way that returns the same basic data structures as the bare-bones
 UWS job list.
+
+In addition to the UWS job related data, we may also want to store
+additional metadata, such as the source of the request (Portal, Notebook,
+user-agent string).
+
+The CADC TAP service stores its UWS related tables, which function
+well as a query history, in a standalone postgres database.  It also
+implements the ability to list jobs as described by the UWS spec.
 
 Determine the Backend
 ^^^^^^^^^^^^^^^^^^^^^
@@ -633,6 +639,11 @@ and then route the query to the appropriate backend.  Different backends
 might also have different load characteristics, such as the number of
 running queries.
 
+Another way to architect this is to have one TAP service endpoint for
+each database, and provide one URL per database.  This would simplify
+the TAP service, but users would need to be more informed as to which
+databases map to which URLs.
+
 Query Rewriting
 ^^^^^^^^^^^^^^^
 
@@ -646,8 +657,14 @@ or datatypes).
 There are also some extensions to do very astronomical things, such as
 cone and other spatial searches, as well as dealing with different
 coordinate systems.
-Different back ends may have very different ways to implement these
+Different back ends have very different ways to implement these
 spherical geometry constructs.
+
+ADQL is also fairly complex, and involves a lot of optional extensions
+and methods.
+Given the restrictions of the QServ spatial library, it will be hard
+to provide a full ADQL implementation - though most other services
+do not provide a full implementation either.
 
 Query Dispatch
 ^^^^^^^^^^^^^^
@@ -655,17 +672,15 @@ Query Dispatch
 Once we have the final query and we know where it's going, we are
 ready to send the rewritten query to the backend and start getting the
 results.  Since these results may be very large (GBs) or very small
-(0 or 1 rows), we need to be able to support both cases in a performant
-way.
+(0 or 1 rows), we need to be able to support both cases in a performantly.
 
 For sync queries, the caller simply waits on the HTTP connection until
 the results are available.  For async queries, since the caller will
 make another request, we need to ensure that these requests will always
-find the results, no matter how many TAP service copies we have.  This
-means we can't really store results locally on the TAP service disk
-(also this has the possibility of filling up the disk).  It is better
-to have a central disk or shared place, so that results can be written
-there, and then picked up by anyone handling getting the results.  This
+find the results, no matter the scale factor of the TAP service.  This
+means we can't locally store results on the TAP service disk.  It is better
+to have a central result store, so that results can be written
+there, and retrieved up by anyone handling getting the results.  This
 also helps with keeping results through upgrades and transient failures.
 
 It's also a good idea to separate out your front ends (things taking HTTP
@@ -684,29 +699,24 @@ to be used, rather than simply inferring them from the underlying database
 data types.
 
 .. note::
-   QServ also supports an async query mode.  We should investigate this
-   to determine where it fits in with our plans.  Inevitably we will
-   have to gather the results, and put them in an IVOA-compliant format.
-
-.. note::
    We need to figure out how to properly impersonate the user making
-   the request.  Do we store their token, or use a service account and
-   su to them?
+   the request in QServ.  Do we store their token, or use a service
+   account and su to them?
 
 
 Centralized Result Store
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-After the user has completed their query, they will want their results,
+After the user has completed their query, they will retrieve their results,
 which may be large.  They may be downloaded more than once, so we likely
 want to keep the results sets around for at least a few days, to prevent
-needing to rerun the same query on the database.
+rerunning to the same query.
 
 Because of the diversity of queries and their results sizes, and not
 being able to know the size of the results from the query, we need to be
 careful about local resources.  If the results were stored on the TAP
 service nodes, we could easily fill up the local disk, which may be as
-few as 20 results for 100 GB.  The fragmentation of splitting the load
+few as 20 results for 100 GB.  The fragmentation of load
 across multiple TAP service nodes might also be bad, since the sizes of
 the results might be uneven, filling up some nodes and leaving others
 empty.  We want to store all these in a central place, preferably with
@@ -729,20 +739,24 @@ top of and completely depends on.
 
 The overhead of processing a request, parsing the query, putting
 it in ADQL, and dispatching it to the server should be very quick
-compared to running the query.  This time should be fairly constant
+compared to running the query.  This runtime should be constant
 no matter what the query is.
 
 Running a query is completely dependent on the query (which we
 don't control) and the database (which we depend on, but don't
-control).  Things like the load on the shared database resources
-from other users and other queries can't really be predicted.
+control).  Load on the shared database resources cannot easily
+be predicted or accounted for.
 
-The DAX Webservices can be good stewards of these shared resources.
+The TAP service can be good a steward of these shared resources.
 By having a work queue with a consistent maximum number of queries
 in flight, we can provide an orderly way to access a limited resource,
 without overloading it.  There is usually a sweet spot in terms of
 performance, where you are fully using your resources, but not thrashing,
 that we will hopefully discover and tune our system accordingly.
+QServ is designed for these kinds of workloads with their shared scan
+architecture.  This allows for one set of IO reads to service a set
+of inflight queries participating in a table scan.  In this way, it
+is good to have QServ has as many queries in flight as it can support.
 
 The overhead of processing the response is certainly higher than
 that of the request.  Having to take an up to 5 GB file and transmute
@@ -752,7 +766,7 @@ Given that we know we have a 5 GB limit on query responses, we can
 ensure that our portion of the processing of the results will generally
 have a fixed upper bound.
 
-Because the database service doesn't have much internal state, and has
+Because the TAP service doesn't have much internal state, and has
 no important data to lose, the failure characteristics are straightforward.
 We might fail the request, and have to retry it, or lose a result.  Since
 we cannot keep all results for all time, it's inevitable that some results
@@ -767,11 +781,11 @@ Image Service
 ObsTAP
 ------
 
-ObsTAP is the way to query and determine metadata about image data.
+ObsTAP is the way to query and discover image metadata.
 By using the same TAP / VOTable infrastructure from the database service,
 a user or client can craft a query against the available metadata to
 discover what images exist that fulfill those criteria, and retrieve
-the URL to access them.
+URLs to access them.
 
 The types of queries that can be run are independent of the data being
 served - the standard dictates what tables and columns must exist to
@@ -800,7 +814,9 @@ format (JPG, FITS) the image at that URL is encoded in.  The format column
 is a string containing a standard MIME-type.
 
 Along with image metadata, ObsTAP also supports serving and querying
-provenance data, although it is not required.
+provenance data, although it is not required.  The specification also
+allows for additional columns to be present, allowing for LSST specific
+image metadata columns.
 
 .. note::
   Are we going to use ObsTAP to serve provenance data?
@@ -825,6 +841,9 @@ VOTable consistent with that of ObsTAP responses (Section 3.1 SIA spec).
 The sync nature of the request/response is to retrieve a VOTable response,
 containing links to the images, not sync/async about image retrieval.
 This will be related to a point mentioned below about PVI availability.
+
+If we have an ObsTAP service available, SIA can be implemented on top
+of that service.
 
 SODA
 ----
@@ -852,10 +871,9 @@ provide an ID that can be later retrieved for large result sets.
 Depending on the arguments, one query can provide multiple image results,
 for example looking at multiple bands, or drawing multiple CIRCLEs.
 
-.. note::
-   It looks like SODA allows for us to also do our own custom parameters,
-   to allow for more operations to happen.  Other than the cutouts defined
-   by the spec, what server side transformations do we need?
+SODA also allows for different operations other than cutouts.  We may be
+implementing additional LSST specific operations to handle other common
+operations, such as rotation or time dependent usage.
 
 
 LSST Specific Requirements
@@ -870,27 +888,20 @@ we'd like to serve through these endpoints and queries:
 
   1. PVIs - Processed Visit Images
   2. Multiple sets of coadds - Created by Coadding PVIs.
+  3. HiPS and Multi-Ordered Coverage Maps
 
 Each of these will have images per band, and covering the LSST footprint.
 There are also multiple different sets of Coadds using different addition
 methods and selections of raw data.
 
-.. note::
-   How to multiple data releases come into play when handling image metadata?
-   Should this be a different dataset id?
-
 PVI Retention and Virtual Products
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Due to cost and space constraints, the current plan does not involve storing
-all the PVIs on disk.  There is only a 30 day moving window of availability
-for these images while they are processed and can be easily read off disk.
-
-After this 30 day window, additional work would need to happen to be able
-to recreate the PVI file, which could then be served to the caller.  This
+For some LSST data products, additional work would need to happen to be able
+to recreate the product, which could then be served to the caller.  This
 work would involve having to read off tape (or hopefully, a disk) the raw
 image components, then use the workflow system to tell it to create the
-PVIs.  While most of this logic is out of scope of this document, the
+result.  While most of this logic is out of scope of this document, the
 important point is that this may take minutes and possibly even hours before
 an image can be served.
 
@@ -929,10 +940,8 @@ users, allowing for caching and result reuse to be higher and easier to
 accomplish in a secure manner.
 
 Either way, we will want to audit the access logs to this service, and
-attempt to determine usage patterns, to improve performance.
-
-.. note::
-   What are our requirements for public history of image requests?
+attempt to determine usage patterns, to improve performance.  Having a
+similar set of data as the TAP service is suggested.
 
 Large Result Sets
 ^^^^^^^^^^^^^^^^^
@@ -945,6 +954,9 @@ Since we have to support async queries to SODA, and because those jobs
 may take a while to run, it makes sense to use the same centralized results
 backend to store the data and provide URLs to objects in that backend.
 
+Results may also be stored directly to a user's VOSpace or put in their
+homedirectory.
+
 Image Metadata
 ^^^^^^^^^^^^^^
 
@@ -953,7 +965,9 @@ about PVIs.  This would be ideal if it's in the ObsCoreDM format so it
 can directly be queried against using ObsTAP.  Even if it's not exactly
 in the same format, we'll need to provide some kind of ObsTAP-compliant
 view of that data to allow for queries, since the metadata model has
-to be in a specific format to follow the standard.
+to be in a specific format to follow the standard.  There may be some
+transformation process for exporting ObsCore or CAOM information from
+the LSST specific information.
 
 We will also need tables that contain the metadata about all the coadds,
 so they can also be discovered, even though it's not a visit at all, and
@@ -1002,7 +1016,8 @@ because for each SIA query it can be mapped into an ObsTAP query, and the
 response is of the same format (VOTable).  SIA only supports sync though, so it
 should only be for short queries.  Again, the sync part is only relating to the
 query, but the images might also not be available for some time, even if there
-is an access_link provided in the response.  This may break SIA clients.
+is an access_link provided in the response.  This may break SIA clients
+expecting instant gratification.
 
 Retrieving Images
 ^^^^^^^^^^^^^^^^^
@@ -1013,8 +1028,9 @@ processing such as cutouts to receive a processed image via SODA on those PVIs o
 coadds.
 
 Both of these types of requests can be served by one service, and that server
-uses the Butler as its backend for retrieving images and doing simple processing
-such as cutouts.
+uses the Butler as its backend for retrieving images and providing that data
+to the PipelineTasks in the Science Pipelines for processing and creating
+the cutouts.
 
 If the URL presented is not a SODA request, we can say that this is a request
 asking directly for a full image (either PVI or Coadd).  We use the URL to map
@@ -1043,6 +1059,7 @@ Because the resulting files can be large, we can upload or copy them to shared
 storage in an object store, and have the image server redirect HTTP requests
 for finished work items to their URL in the object store.  In this way, we can
 split up the workers and the servers and scale them up and down independently.
+Results may also be stored directly in the user's VOSpace.
 
 Performance, Load, and Failure Characteristics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1062,7 +1079,7 @@ and having to be queued and executed there.  This is also a shared resource, so
 depending on load from other portions of the system, this could be slow and add
 latency to the end user.
 
-For processing cutouts and doing mosaics, we will likely use the Butler and
+For processing cutouts and doing mosaics, we will use the Science Pipelines and
 local CPU processing to create those products.  This means we need to provision
 the CPU correctly - not too small so that big jobs take a long time, but not
 having a lot of unused resources on a worker.  If we have workers that have too
@@ -1144,6 +1161,8 @@ particular query string can be added to a list of tests to run to check
 for regressions.  Since each test is essentially just a query, and making
 sure the response hasn't changed, we can use a hash of the results, or
 check the results for particular fields to validate that it is the same.
+There are some common queries provided by the science team that should be
+translated to ADQL and put in the testing regime.
 
 One type of testing that may have timing issues in it is the general robustness.
 We need to make sure things like deploys and upgrades work without issue, and
@@ -1185,6 +1204,9 @@ There are some obvious ways of doing this:
    a disk big enough to have all users at full quota.  Like a gym, we have
    to assume some people won't use their allotment.
 
+#. Force users to store results in their VOSpace, which will count against
+   their storage quota.
+
 It's likely we'll have some kind of combination of business rules of these
 strategies, and we want to keep this as an operational sidecar script that
 can be easily tweaked and run by hand if necessary.  If we use an object
@@ -1193,7 +1215,7 @@ store to clean it out on demand, or even hand pick certain results to
 delete.
 
 .. note::
-   These are just guesses. Determine actual requirements here.
+   These are just guesses. Determine actual requirements / policies here.
 
 .. .. rubric:: References
 
